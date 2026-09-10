@@ -2630,13 +2630,10 @@ class WXBot:
     # 旧消息"）。改为「整个会话期间相同内容只处理一次」，从根上杜绝旧消息重放。
     POLL_SEEN_MAX = 3000
 
-    # 分页指令词集：下一页/上一页等。这些指令需要「每次都执行」——用户连续翻页时
-    # 两次内容完全相同，若走内容去重会被静默丢弃（现象：执行一次，第二次不执行）。
-    # 由于其回复是结果页、永远不是分页词本身，豁免内容去重无「指令循环重放」风险。
-    _PAGE_CMD_WORDS = frozenset(
-        list(getattr(_session, "NEXT_WORDS", set()))
-        + list(getattr(_session, "PREV_WORDS", set()))
-    )
+    # 说明：这里曾经定义过 _PAGE_CMD_WORDS（下一页/上一页等）并给分页指令做
+    # 「豁免内容去重」的特殊分支。2026-09-10 重构后已删除 —— 新消息由「序列前后缀
+    # 对齐 + 位置」判定（见 _poll_loop），连发 N 次「下一页」天然是 N 条不同的消息，
+    # 不再需要任何按内容开的后门。分页指令与其他消息走完全相同的路径。
 
     # 机器人自己生成的状态/结果行，通常以 emoji/装饰图标开头。轮询时即使 seen 因极端
     # 情况漏判，也直接跳过这类行 —— 彻底杜绝"机器人回显被当成指令反复重跑"的死循环。
@@ -2661,10 +2658,9 @@ class WXBot:
 
         self._poll_stop = threading.Event()
         self._poll_seen = {}
-        self._poll_count = {}         # 增量游标：每个聊天已消费的消息条数（正常增量路径用）
-        self._poll_last_fp = {}       # 指纹游标：每个聊天「最后一条已消费消息」的键（列表回缩时兜底定位）
-        self._poll_resync = {}        # 发送后已重新对齐游标的聊天：本轮轮询结尾不要用过期条数覆盖
-        self._poll_tail_ready = set() # 已完成过一轮轮询的聊天（尾部兜底从第二轮起才启用）
+        # 上轮窗口的「消息键序列」。轮询用它与本轮序列做前后缀对齐来定位新消息，
+        # 取代旧的「条数游标 + 内容指纹游标」组合（详见 _poll_loop 注释）。
+        self._poll_prev_seq = {}
         self._poll_targets = []
         self._poll_interval = 1.5     # 轮询间隔（秒），后续可在面板开放配置
         self._poll_seen_max = self.POLL_SEEN_MAX
@@ -2692,7 +2688,7 @@ class WXBot:
                             _src not in [t[0] for t in self._poll_targets]:
                         self._poll_targets.append((_src, "friend"))
 
-        # 发送成功回调：把该聊天当前消息全部标记为已读，杜绝自问自答死循环
+        # 发送成功回调：把该聊天当前消息标记为已读，并把窗口序列对齐到含本次回复的状态
         self.wx.on_sent = self._mark_chat_seen
 
         self._seed_poll_seen()
@@ -2702,11 +2698,11 @@ class WXBot:
                    f"{[t[0] for t in self._poll_targets]}")
 
     def _seed_poll_seen(self):
-        """把当前各聊天历史消息标记为已读（游标+seen 双保险），避免启动即回放旧消息。
+        """把当前各聊天历史消息标记为已读 + 记录初始窗口序列，避免启动即回放旧消息。
 
         关键：启动瞬间微信窗口可能未就绪，GetAllMessage 会读到空列表或抛异常；
-        若此时直接以 0 作为游标，第一轮轮询会把整段历史消息当新消息全量回放。
-        因此对「读不到消息」做重试，确保窗口稳定后再定游标。
+        若此时序列为空，第一轮轮询会把整段历史消息当新消息全量回放。
+        因此对「读不到消息」做重试，确保窗口稳定后再记录。
         """
         _t = time.time()
         for who, _t2 in self._poll_targets:
@@ -2722,53 +2718,64 @@ class WXBot:
             seen = self._poll_seen.setdefault(who, {})
             for m in msgs:
                 seen[self._msg_key(m, who)] = _t
-            # 游标直接跳到当前条数：已存在的消息泡不会在增量路径被重新处理
-            self._poll_count[who] = len(msgs)
-            # 指纹游标：记录最后一条消息的键，供列表回缩时兜底定位
-            if msgs:
-                self._poll_last_fp[who] = self._msg_key(msgs[-1], who)
+            # 记录初始序列：之后每轮都与它做前后缀对齐，已存在的消息不会被重放
+            self._poll_prev_seq[who] = [self._msg_key(m, who) for m in msgs]
 
     @staticmethod
     def _msg_key(m, who=None):
         # 关键：msg.id 只是「当前 UI 控件的运行时标识」，不是微信全局消息ID，
         # 切窗/重绘/控件复用都会让它变动甚至碰撞，绝不可单独用于持久去重。
-        # 采用「会话名 + 发送人 + 类型 + 内容」组合主键（内容级去重，会话期内只处理一次）。
+        # 采用「会话名 + 发送人 + 类型 + 内容」组合主键。
         # 注意：故意不含 attr —— attr(friend/self/system) 是切窗时的 UI 状态，可能在
         # 重绘/滚动时波动；若纳入主键，同一条消息在切窗前后键值不同、去重直接失效。
         # sender 本身已能区分我方回显(机器人昵称/self)与用户消息(好友昵称)。
+        #
+        # ⚠️ 本键【不保证唯一】：连发两条内容相同的消息（如两次「下一页」）键完全相同。
+        # 这不是缺陷而是刻意设计 —— 唯一性由「序列对齐 + 位置」提供（见 _poll_loop），
+        # 而不是靠内容键。历史版本试图用内容键做「是否已处理」的判断，正是
+        # 「连续翻页被吞」的根因；任何基于本键的 seen 判断都只能是兜底，不能当主键用。
         return (who or '', getattr(m, 'sender', ''), getattr(m, 'type', ''),
                 str(getattr(m, 'content', '')))
 
-    @classmethod
-    def _is_page_cmd(cls, content):
-        """是否分页指令（下一页/上一页等）。这些词需要连续执行，豁免内容级去重。"""
-        return bool(content) and content.strip() in cls._PAGE_CMD_WORDS
+    @staticmethod
+    def _seq_overlap(prev, cur):
+        """位置感知对齐：返回最大的 t，使 prev 的最后 t 条 == cur 的前 t 条。
+
+        微信聊天列表是虚拟列表，两轮之间的变化只有两种：
+          1. 顶部旧消息被截断（可渲染条数下降）
+          2. 底部追加新消息
+        因此 cur 必然形如 `prev[k:] + 新消息`，即 **prev 的一个后缀 == cur 的一个前缀**。
+        取最大的 t 后，cur[t:] 就是本轮真正新增的消息。
+
+        相比「内容指纹定位」的优越性：完全不看内容是否重复。
+        连发两次「下一页」时，旧的指纹定位无法区分它们（键相同）；
+        而序列对齐靠位置区分，第一次在前、第二次在后，天然是两条不同的消息。
+        """
+        k = len(prev)
+        if k > len(cur):
+            k = len(cur)
+        for t in range(k, 0, -1):
+            if prev[-t:] == cur[:t]:
+                return t
+        return 0
 
     def _mark_chat_seen(self, who):
-        """发送成功后调用：只把「我方刚发出的回显」(attr=self) 标记为已读。
+        """发送成功后调用：只把「我方刚发出的回显」(attr=self) 标记为已读，
+        并把窗口序列对齐到含本次回复的真实状态。
 
         关键：绝不标记用户消息(attr=friend/system)。否则用户抢在发送窗口内发来的
-        「下一页」等指令会被误标成已读，后续轮询（尤其 shrink 回缩分支的
-        `is_page and shrink and key in seen`）据此跳过，导致漏处理——这是
-        「发送下一页后很久没反应 / 连续两次下一页都没被处理」的根因。
+        「下一页」等指令会被误标成已读，后续轮询据此跳过，导致漏处理。
         我方回显本身已被轮询的 `attr=='self'` 分支跳过，这里只做额外兜底。
         """
         if who not in [t[0] for t in self._poll_targets]:
             return
         try:
             msgs = self.wx.read_messages(who)
-            # —— 关键：发送后立刻把「条数游标 / 指纹游标」重新对齐到含本次回复的真实状态 ——
-            # 机器人回复（尤其是搜索结果这类多行长消息）会让微信虚拟列表的可渲染条数
-            # 骤降，下一轮轮询就会判定「窗口回缩」并改用内容指纹定位。但连续两条内容
-            # 完全相同的指令（连发两次「下一页」）指纹一模一样，定位必然把新发的那条
-            # 误判成已消费的那条 → 用户实测现象：第一次翻页成功、第二次毫无反应。
-            # 发送后即在现场重新对齐游标，回缩就不会再发生在轮询里，从根上绕开
-            # 「内容指纹无法区分连续相同指令」这个死结（wxauto 免费版没有跨轮稳定
-            # 且唯一的消息 ID：msg.id 切 UI 会变，msg.hash 可能重复）。
+            # 发送后立刻把序列对齐到「含本次回复」的真实状态：
+            # 机器人回复（尤其搜索结果这类多行长消息）会让虚拟列表可渲染条数骤降，
+            # 若不在这里对齐，下轮序列就可能与本轮完全对不上（t=0）而被迫整段重扫。
             if msgs:
-                self._poll_count[who] = len(msgs)
-                self._poll_last_fp[who] = self._msg_key(msgs[-1], who)
-                self._poll_resync[who] = True
+                self._poll_prev_seq[who] = [self._msg_key(m, who) for m in msgs]
             seen = self._poll_seen.setdefault(who, {})
             _t = time.time()
             for m in msgs:
@@ -2795,73 +2802,40 @@ class WXBot:
                     msgs = self.wx.read_messages(who)
                     n = len(msgs)
                     # 空读保护：切窗失败/窗口未渲染完成时 GetAllMessage 会返回空列表。
-                    # 此时绝不动游标与指纹——否则会把 _poll_count 清零、把 _poll_last_fp
-                    # 污染成错误窗口的指纹，导致后续真正的新消息被整段漏读
+                    # 此时绝不动窗口序列——否则会把序列污染成错误窗口的内容，
+                    # 导致后续真正的新消息对不上而被整段漏读
                     # （"不停切换窗口却总是漏消息"的根因之一）。
                     if n == 0:
                         log(level="WARNING",
-                            message=f"[轮询] {who} 读取 0 条（切窗可能未就绪），跳过本轮、游标与指纹保持不变")
+                            message=f"[轮询] {who} 读取 0 条（切窗可能未就绪），跳过本轮、序列保持不变")
                         continue
                     seen = self._poll_seen.setdefault(who, {})
-                    # 增量游标：只处理「自上次轮询以来新追加」的消息泡。
-                    # GetAllMessage 返回当前窗口按时间排序的全部消息，新消息只会在末尾追加；
-                    # 用「已消费条数」做游标，每条泡只处理一次。注意：游标必须在每轮末尾
-                    # 推进到 n，否则新消息会被每轮反复重读（历史 bug 根因）。
-                    cursor = self._poll_count.get(who, 0)
-                    shrink = n < cursor     # 窗口回缩（重绘/截断）→ 条数游标失效
-                    rescan_all = False      # 是否整段重扫（last_fp 也找不到，才需要 seen 兜底防重放）
-                    if shrink:
+                    # ============ 单点定位：序列前后缀对齐 ============
+                    # 与上轮窗口序列做对齐，找出本轮真正新增的消息。
+                    # 这取代了旧的「条数游标 + 内容指纹游标 + is_page 豁免 + _is_last 豁免
+                    # + 尾部兜底」四层补丁 —— 那套东西存在的唯一理由就是内容键会撞，
+                    # 而位置对齐根本不看内容，连续 N 次「下一页」天然是 N 条不同的消息。
+                    cur_seq = [self._msg_key(m, who) for m in msgs]
+                    prev_seq = self._poll_prev_seq.get(who, [])
+                    t = self._seq_overlap(prev_seq, cur_seq)
+                    aligned = t > 0
+                    if aligned:
+                        # 对齐成功：cur_seq[t:] 即新增，纯按位置判断，不查 seen
+                        new_idx = range(t, n)
+                    else:
+                        # 两轮窗口完全没有重叠（切窗失败读到别的聊天、窗口整体重绘等）：
+                        # 无法用位置判断，退回 seen 内容去重防重放。
+                        new_idx = [i for i in range(n) if cur_seq[i] not in seen]
                         log(level="WARNING",
-                            message=f"[轮询] {who} 窗口回缩：上轮 {cursor} 条 → 本轮 {n} 条，改用指纹游标定位")
-                        # 回缩时条数游标不再可信：改用「指纹游标」定位上次处理到哪，
-                        # 只处理 last_fp 之后的新消息，避免 cursor=0 整段重扫（历史多时
-                        # 性能差，且大量历史命中去重会掩盖真正的新消息）。
-                        last_fp = self._poll_last_fp.get(who, "")
-                        start = -1
-                        if last_fp:
-                            # 关键：从【前往后】找，匹配「最早出现的」last_fp。
-                            # 消息按时间排序(旧→新)，上次已消费的那条是最早的匹配；
-                            # 若从后往前找，会误匹配到「内容相同的新消息」——
-                            # 典型场景：连续两次「下一页」内容完全相同，从后往前会匹配到
-                            # 第二次(末尾那条)，cursor 直接越过它 → 第二次翻页被吞掉
-                            # （用户实测：第 2/8 页成功，第 3 页再发「下一页」无反应）。
-                            for i in range(n):
-                                if self._msg_key(msgs[i], who) == last_fp:
-                                    start = i
-                                    break
-                        if start != -1:
-                            cursor = start + 1   # 指纹定位成功：只处理 last_fp 之后的新消息
-                        else:
-                            cursor = 0           # last_fp 也被顶出：整段重扫，靠 seen 兜底
-                            rescan_all = True
-                            log(level="WARNING",
-                                message=f"[轮询] {who} 指纹(last_fp)未被定位到，整段重扫并靠 seen 兜底防重放")
+                            message=f"[轮询] {who} 窗口序列无法对齐（上轮 {len(prev_seq)} 条 → 本轮 {n} 条），"
+                                    f"整段重扫并靠 seen 兜底防重放")
                     _new_cnt = 0
-                    _handled = set()          # 本轮已交给处理器的消息键（供尾部兜底排重）
-                    for _idx in range(cursor, n):
+                    for _idx in new_idx:
                         m = msgs[_idx]
-                        # 本轮扫描到的最后一条（即窗口里最新的消息）：若是分页指令，
-                        # 一定是用户刚发来的翻页请求，必须执行（豁免 seen 内容去重）。
-                        _is_last = (_idx == n - 1)
-                        key = self._msg_key(m, who)
+                        key = cur_seq[_idx]
                         _content = str(getattr(m, 'content', '')).strip()
                         _attr = getattr(m, 'attr', '')
                         _type = getattr(m, 'type', '')
-                        _sender = getattr(m, 'sender', '')
-                        is_page = self._is_page_cmd(_content)
-                        if not is_page and key in seen:
-                            # 正常去重：shrink 重扫历史时大量出现，属预期不刷屏；
-                            # 非 shrink 时命中 seen 说明这条「新」消息被误标已读过（用户消息），值得提示。
-                            if not shrink and _attr != 'self':
-                                log(message=f"[轮询·跳过] {who} 「{_content}」(来自{_sender}) 内容重复已处理过")
-                            continue
-                        if is_page and (not _is_last) and key in seen:
-                            # 分页指令：只有「窗口里最新那条」才豁免 seen 去重。
-                            # 连续翻页内容完全相同，若一律查 seen，第二次「下一页」会被
-                            # 当成已处理而吞掉；但历史分页指令(非最新)仍需查 seen 防重放。
-                            log(level="WARNING",
-                                message=f"[轮询·跳过] {who} 分页指令「{_content}」非最新消息且已处理过，跳过防重放")
-                            continue
                         seen[key] = _t
                         # 非管理员聊天里「我方自回」消息（attr=self）直接跳过，
                         # 避免把机器人自己的回复再次喂给处理逻辑。
@@ -2881,42 +2855,11 @@ class WXBot:
                             if content in [s.strip() for s in self.wx.recent_self(who)]:
                                 continue
                         chat = _PollChat(who, chat_type, self.wx)
-                        _handled.add(key)
                         try:
                             self.message_handle_callback(m, chat)
                             _new_cnt += 1
                         except Exception as e:
                             log(level="ERROR", message=f"轮询处理 {who} 消息出错: {e}")
-                    # ============ 尾部兜底：窗口最后一条「用户新消息」绝不漏 ============
-                    # 条数游标与内容指纹都可能因窗口回缩/重绘而失准；一旦失准，用户刚
-                    # 发来的指令就会整段不被处理（表现为"机器人没反应"）。这里做最后
-                    # 一道保险：只要窗口最后一条是用户消息（非机器人回显/系统/时间），
-                    # 且这条内容此前从未处理过，就直接处理它。
-                    # 安全性：以 seen 为门槛，历史消息不会被重放；且已用 _handled 排重，
-                    # 正常路径处理过的不会被执行两次。
-                    try:
-                        _tail = msgs[-1]
-                        _t_attr = getattr(_tail, 'attr', '')
-                        _t_type = getattr(_tail, 'type', '')
-                        _t_content = str(getattr(_tail, 'content', '')).strip()
-                        # 第一轮不启用：种子阶段可能只读到部分历史，避免把历史消息当新指令重放
-                        if (who in self._poll_tail_ready and _t_attr not in ('self', 'system')
-                                and _t_type != 'time' and _t_content):
-                            _t_key = self._msg_key(_tail, who)
-                            if _t_key not in _handled and _t_key not in seen:
-                                seen[_t_key] = _t
-                                chat = _PollChat(who, chat_type, self.wx)
-                                _handled.add(_t_key)
-                                try:
-                                    self.message_handle_callback(_tail, chat)
-                                    _new_cnt += 1
-                                    log(level="WARNING",
-                                        message=f"[轮询·尾部兜底] {who} 主路径未覆盖，补处理末尾用户消息"
-                                                f"「{_t_content[:30]}」(来自{getattr(_tail, 'sender', '')})")
-                                except Exception as e:
-                                    log(level="ERROR", message=f"轮询(尾部兜底)处理 {who} 消息出错: {e}")
-                    except Exception as e:
-                        log(level="ERROR", message=f"轮询尾部兜底异常: {e}")
                     # 详细轮询日志（用于诊断漏消息）：
                     # 打印读取条数 + 窗口里最新一条是什么 + 本轮新处理条数。
                     # 若「最新」不是用户刚发的指令（而是机器人的旧回复），说明窗口
@@ -2929,17 +2872,17 @@ class WXBot:
                         )
                     except Exception:
                         _lsum = "?"
-                    log(message=f"[轮询] {who} 读取 {n} 条 | 最新「{_lsum}」 | 本轮新处理 {_new_cnt} 条")
-                    # 关键：推进游标到当前条数，下轮只处理末尾新追加的泡。
-                    # 但若本轮处理过程中机器人发过消息，_mark_chat_seen 已在「发送后」
-                    # 把游标对齐到更新后的真实条数；这里的 n 是轮初的旧快照，
-                    # 覆盖回去会让游标倒退 → 下轮重复处理或误判回缩，必须让位。
-                    if not self._poll_resync.pop(who, False):
-                        self._poll_count[who] = n
-                        # 同步指纹游标：记录最后一条消息的键，供下轮回缩时定位
-                        if msgs:
-                            self._poll_last_fp[who] = self._msg_key(msgs[-1], who)
-                    self._poll_tail_ready.add(who)
+                    # 对齐信息一并打印：t 为「与上轮重叠的条数」，新增 = n - t。
+                    # 若连续多轮 t=0，说明窗口读取不稳定（切窗竞态），是漏消息的前兆。
+                    log(message=f"[轮询] {who} 读取 {n} 条 | 与上轮对齐 {t} 条"
+                               f"{'（整段重扫）' if not aligned else ''}"
+                               f" | 最新「{_lsum}」 | 本轮新处理 {_new_cnt} 条")
+                    # 记录本轮序列，供下轮对齐。
+                    # 若本轮处理过程中机器人发过消息，_mark_chat_seen 已把序列对齐到
+                    # 「含回复」的更新状态；这里是轮初快照，会覆盖成较旧的状态 ——
+                    # 但序列对齐允许「中间插入消息」（对齐只取后缀前缀重叠），
+                    # 所以覆盖成旧快照不会丢消息，只是下轮多扫几条（会被 seen/attr 过滤）。
+                    self._poll_prev_seq[who] = cur_seq
                     # LRU 限容：seen 超过上限时按时间淘汰最旧一半，避免无限增长
                     if len(seen) > _max:
                         items = sorted(seen.items(), key=lambda kv: kv[1])

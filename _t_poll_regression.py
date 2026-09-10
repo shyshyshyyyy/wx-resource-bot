@@ -1,30 +1,21 @@
 # -*- coding: utf-8 -*-
-"""回归测试：验证轮询监听「不漏消息 / 不重放历史 / 连续翻页都执行」。
+"""回归测试：轮询「新消息定位」——序列前后缀对齐（单点，无内容豁免）。
 
-对照 v2.7.3（它跑在 wxautox4 的 GetNextNewMessage 新消息轮询模式，每条只投递一次，
-不需要内容去重）。本项目跑 wxauto4 免费版，无该 API，只能 ChatWith 轮询 —— 因此
-必须在「条数游标 + 内容指纹」之上再补两道保险：
+设计原则（2026-09-10 重构）：
+wxauto4 免费版没有跨轮稳定且唯一的消息 ID（msg.id 切 UI 会变、msg.hash 可能重复），
+内容主键对「连发两条相同内容的消息」必然撞键。因此**唯一性由位置提供，不由内容提供**：
+每轮保存窗口消息键序列，下一轮求「上轮后缀 == 本轮前缀」的最大重叠 t，
+cur[t:] 就是新增消息。连发 N 次「下一页」天然是 N 条不同的消息。
 
-  保险一：发送后立刻重对齐游标（_mark_chat_seen）
-      机器人长回复会让微信虚拟列表可渲染条数骤降 → 下轮判定「回缩」→ 改用内容指纹
-      定位。而连续两条「下一页」内容完全相同、指纹一样，定位必然把新发的那条误判成
-      已消费的那条（用户实测：第一次翻页成功、第二次无反应）。
-  保险二：尾部兜底
-      窗口最后一条若是「从未处理过的用户消息」，无论游标/指纹如何失准都直接处理。
+这套逻辑取代了旧的四层补丁：条数游标、内容指纹游标、is_page 豁免、_is_last 豁免、
+尾部兜底 —— 全部不再需要。seen 只保留一个作用：两轮窗口完全无法对齐（t=0）时防重放。
 
-覆盖场景：
-  1. 启动 seed：历史消息不执行
-  2. 正常增量：新消息只处理一次
-  3. 连续翻页：两次「下一页」都处理
-  4. 回缩(shrink) + 新消息：指纹定位，正确处理新消息、不重放历史
-  5. 回缩且 last_fp 被顶出：整段重扫 + seen 兜底
-  6. _mark_chat_seen 只标 self：用户「下一页」不被误标
-  7. 回缩 + 翻页间有机器人回复 + 第二次「下一页」
-  8. 空读保护：切窗未就绪读到空，不动游标/指纹
-  9. 【用户真实场景】搜索 → 下一页 → 长回复导致回缩 → 第二次「下一页」
-  10. 尾部兜底：游标完全失准时，末尾的全新用户消息仍被处理
+对照实验见 _t_dedup_compare.py：Claude 提的 occurrence 计数方案在回缩场景下
+只处理了 5 次翻页中的 2 次（回缩后同内容消息的 occurrence 重新从 1 开始）。
+
+运行：
+    "D:/python/python.exe" _t_poll_regression.py
 """
-import time
 
 
 class _Msg:
@@ -35,22 +26,24 @@ class _Msg:
         self.content = content
 
     def __repr__(self):
-        return f"<{self.attr}|{self.sender}|{self.content}>"
-
-
-NEXT_WORDS = {"下一页", "下页", "next", "n", "+", "更多"}
-PREV_WORDS = {"上一页", "上页", "prev", "p", "-"}
-PAGE_CMD_WORDS = frozenset(list(NEXT_WORDS) + list(PREV_WORDS))
+        return f"<{self.attr}|{self.sender}|{self.content[:16]}>"
 
 
 def msg_key(m, who=None):
-    # 与 wxbot_core._msg_key 一致：会话名 + 发送人 + 类型 + 内容（不含 attr）
+    """与 wxbot_core._msg_key 一致：会话名 + 发送人 + 类型 + 内容（不含 attr）。"""
     return (who or '', getattr(m, 'sender', ''), getattr(m, 'type', ''),
             str(getattr(m, 'content', '')))
 
 
-def is_page_cmd(content):
-    return bool(content) and content.strip() in PAGE_CMD_WORDS
+def seq_overlap(prev, cur):
+    """最大 t 使 prev[-t:] == cur[:t]（与 wxbot_core._seq_overlap 一致）。"""
+    k = len(prev)
+    if k > len(cur):
+        k = len(cur)
+    for t in range(k, 0, -1):
+        if prev[-t:] == cur[:t]:
+            return t
+    return 0
 
 
 class PollSim:
@@ -58,106 +51,60 @@ class PollSim:
 
     def __init__(self, cmd="文件传输助手"):
         self.config_cmd = cmd
-        self.poll_seen = {}        # who -> {key: ts}
-        self.poll_count = {}       # who -> 条数游标
-        self.poll_last_fp = {}     # who -> 最后一条已消费消息的 key
-        self.poll_resync = {}      # who -> 发送后已重对齐游标
-        self.poll_tail_ready = set()
-        self.handled = []          # (who, content) 处理记录
+        self.poll_seen = {}       # who -> {key: ts}
+        self.poll_prev_seq = {}   # who -> 上轮窗口的消息键序列
+        self.handled = []         # (who, content) 处理记录
+        self.aligned_log = []     # 每轮是否对齐成功
 
     # ---- 对应 wxbot_core._mark_chat_seen ----
     def mark_chat_seen(self, who, msgs):
-        """机器人发送后调用：只标 attr=self，并把游标重对齐到「含本次回复」的真实状态。"""
+        """机器人发送后调用：只标 attr=self，并把序列对齐到含本次回复的状态。"""
         seen = self.poll_seen.setdefault(who, {})
-        t = time.time()
         for m in msgs:
             if getattr(m, 'attr', '') != 'self':
                 continue
-            seen[msg_key(m, who)] = t
+            seen[msg_key(m, who)] = 0.0
         if msgs:
-            self.poll_count[who] = len(msgs)
-            self.poll_last_fp[who] = msg_key(msgs[-1], who)
-            self.poll_resync[who] = True
+            self.poll_prev_seq[who] = [msg_key(m, who) for m in msgs]
 
     def seed(self, who, msgs):
         seen = self.poll_seen.setdefault(who, {})
-        t = time.time()
         for m in msgs:
-            seen[msg_key(m, who)] = t
-        self.poll_count[who] = len(msgs)
-        if msgs:
-            self.poll_last_fp[who] = msg_key(msgs[-1], who)
+            seen[msg_key(m, who)] = 0.0
+        self.poll_prev_seq[who] = [msg_key(m, who) for m in msgs]
 
     def poll_once(self, who, msgs):
         """模拟 _poll_loop 单轮对单个 who 的处理。"""
         n = len(msgs)
         if n == 0:
-            return []   # 空读保护：切窗未就绪读到空，不动游标/指纹
+            return []                       # 空读保护：不动序列
         seen = self.poll_seen.setdefault(who, {})
-        cursor = self.poll_count.get(who, 0)
-        shrink = n < cursor
-        rescan_all = False
-        if shrink:
-            last_fp = self.poll_last_fp.get(who, "")
-            start = -1
-            if last_fp:
-                # 从前往后找：匹配「最早出现的」last_fp（上次已消费的那条）
-                for i in range(n):
-                    if msg_key(msgs[i], who) == last_fp:
-                        start = i
-                        break
-            if start != -1:
-                cursor = start + 1   # 指纹定位成功
-            else:
-                cursor = 0
-                rescan_all = True    # 整段重扫，靠 seen 兜底
+        cur_seq = [msg_key(m, who) for m in msgs]
+        prev_seq = self.poll_prev_seq.get(who, [])
+        t = seq_overlap(prev_seq, cur_seq)
+        aligned = t > 0
+        self.aligned_log.append(aligned)
+        if aligned:
+            new_idx = range(t, n)            # 位置判定，不查 seen
+        else:
+            new_idx = [i for i in range(n) if cur_seq[i] not in seen]   # seen 防重放
         out = []
-        _handled = set()
-        for idx in range(cursor, n):
+        for idx in new_idx:
             m = msgs[idx]
-            is_last = (idx == n - 1)   # 窗口里最新的一条
-            key = msg_key(m, who)
+            key = cur_seq[idx]
             content = str(getattr(m, 'content', '')).strip()
             attr = getattr(m, 'attr', '')
             typ = getattr(m, 'type', '')
-            pg = is_page_cmd(content)
-            if not pg and key in seen:
-                continue
-            # 分页指令：只有「最新一条」豁免 seen 去重，其余查 seen 防重放
-            if pg and (not is_last) and key in seen:
-                continue
-            seen[key] = time.time()
+            seen[key] = 0.0
             if attr == 'self' and who != self.config_cmd:
                 continue
             if attr == 'system' or typ == 'time':
                 continue
             if attr == 'self' and who == self.config_cmd:
-                if content in [s.strip() for s in []]:  # 简化：recent_self 为空
-                    continue
-            _handled.add(key)
+                continue                     # 简化：recent_self 为空
             out.append(content)
             self.handled.append((who, content))
-
-        # ---- 尾部兜底：窗口最后一条「从未处理过的用户消息」绝不漏 ----
-        tail = msgs[-1]
-        t_attr = getattr(tail, 'attr', '')
-        t_type = getattr(tail, 'type', '')
-        t_content = str(getattr(tail, 'content', '')).strip()
-        if (who in self.poll_tail_ready and t_attr not in ('self', 'system')
-                and t_type != 'time' and t_content):
-            t_key = msg_key(tail, who)
-            if t_key not in _handled and t_key not in seen:
-                seen[t_key] = time.time()
-                _handled.add(t_key)
-                out.append(t_content)
-                self.handled.append((who, t_content))
-
-        # 轮末推进游标；但若本轮机器人发过消息，_mark_chat_seen 已对齐过，不要覆盖
-        if not self.poll_resync.pop(who, False):
-            self.poll_count[who] = n
-            if msgs:
-                self.poll_last_fp[who] = msg_key(msgs[-1], who)
-        self.poll_tail_ready.add(who)
+        self.poll_prev_seq[who] = cur_seq
         return out
 
 
@@ -169,141 +116,153 @@ def slf(content, sender="机器人"):
     return _Msg('self', sender, 'text', content)
 
 
-# ---- 场景 1：启动 seed ----
+NX = lambda: fr("Silence", "下一页")     # noqa: E731 每次新对象，模拟新消息
+R = lambda p: slf(f"第{p}/8页 结果（多行长消息）")   # noqa: E731
+
+
+# ---- 场景 1：启动 seed 不重放历史 ----
 sim = PollSim()
 history = [fr("Silence", "你好"), slf("你好，我是机器人"), fr("Silence", "搜索 AI 迅雷")]
 sim.seed("Silence", history)
 assert sim.poll_once("Silence", history) == [], "场景1 失败：启动不应回放历史"
 print("场景1 启动 seed 不重放历史 OK")
 
-# ---- 场景 2：正常增量，新消息处理一次 ----
+# ---- 场景 2：正常增量，新消息只处理一次 ----
 sim = PollSim()
 hist = [fr("Silence", "搜索 AI 迅雷")]
 sim.seed("Silence", hist)
-got = sim.poll_once("Silence", hist + [slf("结果..."), fr("Silence", "下一页")])
+got = sim.poll_once("Silence", hist + [slf("结果..."), NX()])
 assert got == ["下一页"], f"场景2 失败: {got}"
-print("场景2 正常增量处理新消息 OK")
+assert sim.poll_once("Silence", hist + [slf("结果..."), NX()]) == [], "场景2b 失败：不应重复处理"
+print("场景2 正常增量处理新消息且不重复 OK")
 
-# ---- 场景 3：连续翻页 ----
+# ---- 场景 3：连续翻页 2 次 ----
 sim = PollSim()
 hist = [fr("Silence", "搜索 AI 迅雷"), slf("结果...")]
 sim.seed("Silence", hist)
-got1 = sim.poll_once("Silence", hist + [fr("Silence", "下一页")])
-got2 = sim.poll_once("Silence", hist + [fr("Silence", "下一页"), fr("Silence", "下一页")])
-assert got1 == ["下一页"], f"场景3a 失败: {got1}"
-assert got2 == ["下一页"], f"场景3b 失败（连续翻页第二条应处理）: {got2}"
+assert sim.poll_once("Silence", hist + [NX()]) == ["下一页"], "场景3a 失败"
+sim.mark_chat_seen("Silence", hist + [NX(), slf("结果2")])
+assert sim.poll_once("Silence", hist + [NX(), slf("结果2"), NX()]) == ["下一页"], "场景3b 失败"
 print("场景3 连续翻页两条都处理 OK")
 
-# ---- 场景 4：shrink 回缩 + 新消息（指纹定位） ----
+# ---- 场景 4：回缩（顶部被截断）+ 新消息 ----
 sim = PollSim()
 hist = [fr("Silence", f"旧消息{i}") for i in range(20)]
 sim.seed("Silence", hist)
-shrunk = hist[5:] + [fr("Silence", "下一页")]
+shrunk = hist[5:] + [NX()]
 got = sim.poll_once("Silence", shrunk)
-assert got == ["下一页"], f"场景4 失败（回缩时指纹定位应只处理新消息）: {got}"
-print("场景4 回缩时指纹定位不重放历史、正确处理新消息 OK")
+assert got == ["下一页"], f"场景4 失败（回缩时应只处理新消息）: {got}"
+print("场景4 回缩(顶部截断)时只处理新消息、不重放历史 OK")
 
-# ---- 场景 5：回缩且 last_fp 被顶出（整段重扫 + seen 兜底） ----
+# ---- 场景 5：回缩但无新消息，不重放 ----
 sim = PollSim()
 hist = [fr("Silence", f"旧消息{i}") for i in range(20)]
+sim.seed("Silence", hist)
+assert sim.poll_once("Silence", hist[8:]) == [], "场景5 失败：回缩无新消息不应重放"
+print("场景5 回缩但无新消息不重放 OK")
+
+# ---- 场景 6：两轮完全无重叠（切窗读到别的聊天）→ seen 防重放 ----
+sim = PollSim()
+hist = [fr("Silence", f"旧消息{i}") for i in range(10)]
 sim.seed("Silence", hist)
 only_new = [fr("Silence", "新消息A"), fr("Silence", "新消息B")]
 got = sim.poll_once("Silence", only_new)
-assert got == ["新消息A", "新消息B"], f"场景5 失败: {got}"
-print("场景5 回缩且 last_fp 被顶出时回退 seen 兜底 OK")
+assert got == ["新消息A", "新消息B"], f"场景6 失败: {got}"
+assert not sim.aligned_log[-1], "场景6 应记录为未对齐"
+print("场景6 两轮无重叠时整段重扫 + seen 防重放 OK")
 
-# ---- 场景 6：_mark_chat_seen 只标 self，不吞用户「下一页」 ----
+# ---- 场景 7：_mark_chat_seen 只标 self，不吞用户「下一页」 ----
 sim = PollSim()
 hist = [fr("Silence", "搜索 AI 迅雷")]
 sim.seed("Silence", hist)
-sim.mark_chat_seen("Silence", [slf("结果..."), fr("Silence", "下一页")])
-sim.poll_resync.pop("Silence", None)   # 模拟：发送发生在两轮之间，游标已被对齐
-got = sim.poll_once("Silence", hist + [slf("结果..."), fr("Silence", "下一页")])
-assert got == ["下一页"], f"场景6 失败（_mark_chat_seen 不应吞用户下一页）: {got}"
-print("场景6 _mark_chat_seen 只标 self、不误吞用户消息 OK")
-
-# ---- 场景 7：回缩 + 翻页间有机器人回复 + 第二次「下一页」 ----
-sim = PollSim()
-hist20 = [fr("群", f"旧消息{i}") for i in range(20)]
-sim.seed("群", hist20)
-got1 = sim.poll_once("群", hist20 + [fr("群", "下一页")])
-assert got1 == ["下一页"], f"场景7a 失败: {got1}"
-sim.poll_once("群", hist20 + [fr("群", "下一页"), slf("结果...")])
-shrunk = hist20[5:] + [fr("群", "下一页"), slf("结果..."), fr("群", "下一页")]
-got2 = sim.poll_once("群", shrunk)
-assert got2 == ["下一页"], f"场景7b 失败（第二次翻页应处理）: {got2}"
-print("场景7 回缩时指纹定位成功、第二次翻页不被 seen 误判 OK")
+nx = NX()
+sim.mark_chat_seen("Silence", [slf("结果..."), nx])
+got = sim.poll_once("Silence", hist + [slf("结果..."), nx])
+assert got == ["下一页"], f"场景7 失败（_mark_chat_seen 不应吞用户下一页）: {got}"
+print("场景7 _mark_chat_seen 只标 self、不误吞用户消息 OK")
 
 # ---- 场景 8：空读保护 ----
 sim = PollSim()
 hist = [fr("Silence", "搜索 AI 迅雷")]
 sim.seed("Silence", hist)
 assert sim.poll_once("Silence", []) == [], "场景8a 空读应返回空"
-assert sim.poll_count["Silence"] == 1, "场景8a 失败：空读不应清空游标"
-assert sim.poll_last_fp["Silence"] == msg_key(hist[-1], "Silence"), "场景8a 失败：空读不应污染指纹"
-got = sim.poll_once("Silence", hist + [fr("Silence", "下一页")])
-assert got == ["下一页"], f"场景8b 失败（空读后恢复应正确处理新消息）: {got}"
-print("场景8 空读保护：切窗未就绪不污染游标/指纹，恢复后不漏消息 OK")
-
+assert sim.poll_prev_seq["Silence"] == [msg_key(hist[0], "Silence")], "场景8a 失败：空读不应污染序列"
+assert sim.poll_once("Silence", hist + [NX()]) == ["下一页"], "场景8b 失败：空读恢复后应处理新消息"
+print("场景8 空读保护：切窗未就绪不污染序列，恢复后不漏消息 OK")
 
 # ---- 场景 9：【用户真实场景】搜索 → 下一页 → 长回复致回缩 → 第二次「下一页」 ----
-# 三种子情形都必须让第二次「下一页」被执行。
 def _s9_base():
     s = PollSim()
-    h = [fr("Silence", "搜索 刘德华 夸克"), slf("🔵 第1/8页 结果…")]
+    h = [fr("Silence", "搜索 刘德华 夸克"), slf("第1/8页 结果")]
     s.seed("Silence", h)
-    # 用户发第一次「下一页」→ 必须执行
-    assert s.poll_once("Silence", h + [fr("Silence", "下一页")]) == ["下一页"], \
-        "场景9 第一次翻页应执行"
+    assert s.poll_once("Silence", h + [NX()]) == ["下一页"], "场景9 第一次翻页应执行"
     return s, h
 
 
-P2 = slf("🔵 第2/8页 结果…（很长的多行搜索结果）")
-NX1 = fr("Silence", "下一页")     # 第一次翻页（已在 seen 中）
-NX2 = fr("Silence", "下一页")     # 第二次翻页（内容完全相同）
-
-# 9A：发送后回复已渲染，下轮窗口里回复仍可见 → 指纹定位到回复之后
+# 9A：回复在发送后已渲染，下轮仍可见
 s, h = _s9_base()
-s.mark_chat_seen("Silence", h + [NX1, P2])     # 游标对齐到 4 条
-s.poll_resync.pop("Silence", None)
-got = s.poll_once("Silence", [NX1, P2, NX2])   # 回缩到 3 条
-assert got == ["下一页"], f"场景9A 失败（第二次翻页应执行）: {got}"
-print("场景9A 长回复可见：指纹定位到回复之后，第二次翻页执行 OK")
+s.mark_chat_seen("Silence", h + [NX(), R(2)])
+got = s.poll_once("Silence", [NX(), R(2), NX()])
+assert got == ["下一页"], f"场景9A 失败: {got}"
+print("场景9A 长回复可见：第二次翻页执行 OK")
 
-# 9B：发送后回复已渲染，但下轮回缩后回复不可见 → 整段重扫 + 最新一条豁免 seen
+# 9B：回缩极狠，窗口只剩 2 条（虚拟列表只截顶部，机器人刚发的回复必然在末尾附近）
 s, h = _s9_base()
-s.mark_chat_seen("Silence", h + [NX1, P2])     # 游标对齐到 4 条
-s.poll_resync.pop("Silence", None)
-got = s.poll_once("Silence", [h[1], NX1, NX2])  # 回缩到 3 条，机器人回复不在窗口内
-assert got == ["下一页"], f"场景9B 失败（第二次翻页应执行）: {got}"
-print("场景9B 长回复不可见：整段重扫靠最新一条豁免，第二次翻页执行 OK")
+s.mark_chat_seen("Silence", h + [NX(), R(2)])
+got = s.poll_once("Silence", [R(2), NX()])
+assert got == ["下一页"], f"场景9B 失败: {got}"
+print("场景9B 回缩至只剩 2 条：第二次翻页仍执行 OK")
 
-# 9C：发送后即时读取时回复尚未渲染 → 游标停在旧值，下轮走正常增量
+# 9C：发送后即时读取时回复尚未渲染（序列不含回复），下轮才补上
 s, h = _s9_base()
-s.mark_chat_seen("Silence", h + [NX1])         # 回复未渲染，游标对齐到 3 条
-s.poll_resync.pop("Silence", None)
-got = s.poll_once("Silence", [h[0], NX1, P2, NX2])   # 4 条 > 游标 3，正常增量
-assert got == ["下一页"], f"场景9C 失败（第二次翻页应执行）: {got}"
-print("场景9C 回复未即时渲染：游标停在旧值走正常增量，第二次翻页执行 OK")
+s.mark_chat_seen("Silence", h + [NX()])          # 回复未渲染，序列仍以 NX1 结尾
+got = s.poll_once("Silence", [NX(), R(2), NX()])  # 顶部截断，末尾是第二次翻页
+assert got == ["下一页"], f"场景9C 失败: {got}"
+print("场景9C 回复未即时渲染：第二次翻页仍执行 OK")
 
-# ---- 场景 10：尾部兜底（游标完全失准，末尾是全新的用户消息） ----
+# ---- 场景 10：【关键】连续 5 次「下一页」+ 每次长回复都回缩 ----
+# 用「完整消息流 + 只渲染最后 N 条」建模，贴近虚拟列表的真实行为。
+# Claude 描述的「第一次成功、第二次靠豁免成功、第三次开始必然失效」必须不复现
+# （_t_dedup_compare.py 里 occurrence 方案实测逐轮为 [1,1,0,0,0]）。
 sim = PollSim()
-hist = [fr("Silence", f"旧消息{i}") for i in range(30)]
-sim.seed("Silence", hist)
-sim.poll_once("Silence", hist)              # 第一轮：进入 tail_ready
-# 窗口剧烈回缩且内容与历史毫无重叠，末尾是一条全新指令
-got = sim.poll_once("Silence", [hist[3], fr("Silence", "搜索 周星驰 夸克")])
-assert got == ["搜索 周星驰 夸克"], f"场景10 失败（尾部兜底应补处理末尾新指令）: {got}"
-print("场景10 尾部兜底：游标失准时末尾全新用户消息仍被处理 OK")
+stream = [fr("Silence", "搜索 刘德华 夸克"), R(1)]
+sim.seed("Silence", stream[-3:])
+got_all, per_round = [], []
+for i in range(5):
+    stream.append(NX())                     # 用户发「下一页」
+    r = sim.poll_once("Silence", stream[-3:])   # 窗口只渲染最后 3 条（回缩）
+    got_all.extend(r)
+    per_round.append(len(r))
+    stream.append(R(2 + i))                 # 机器人回复结果页
+    sim.mark_chat_seen("Silence", stream[-3:])  # 发送后读取（同样只渲染 3 条）
+assert got_all == ["下一页"] * 5, \
+    f"场景10 失败（连续 5 次翻页应全部执行）: 逐轮={per_round} 实际={got_all}"
+print(f"场景10 连续 5 次翻页 + 每次回缩，全部执行 OK（逐轮 {per_round}）")
 
-# ---- 场景 11：尾部兜底不重放历史（已处理过的消息不重复执行） ----
+# ---- 场景 11：一轮内用户连发两条不同指令，都要处理 ----
 sim = PollSim()
-hist = [fr("Silence", "旧消息A"), fr("Silence", "旧消息B")]
+hist = [fr("Silence", "旧1")]
 sim.seed("Silence", hist)
-got = sim.poll_once("Silence", hist)
-assert got == [], f"场景11a 失败（已 seed 的历史不应重放）: {got}"
-got = sim.poll_once("Silence", [fr("Silence", "旧消息B"), fr("Silence", "旧消息C")])
-assert got == ["旧消息C"], f"场景11b 失败（只应处理新消息 C）: {got}"
-print("场景11 尾部兜底只补新消息、不重放历史 OK")
+got = sim.poll_once("Silence", hist + [fr("Silence", "搜索 A"), fr("Silence", "搜索 B")])
+assert got == ["搜索 A", "搜索 B"], f"场景11 失败: {got}"
+print("场景11 一轮内连发两条不同指令都处理 OK")
+
+# ---- 场景 12：中间插入了机器人消息（两轮之间发送但序列未重对齐） ----
+sim = PollSim()
+hist = [fr("Silence", "旧1"), fr("Silence", "旧2")]
+sim.seed("Silence", hist)
+# 机器人主动推送一条（未走 mark_chat_seen 重对齐），然后用户发指令
+got = sim.poll_once("Silence", hist + [slf("定时推送"), NX()])
+assert got == ["下一页"], f"场景12 失败（中间插入消息不应影响定位）: {got}"
+print("场景12 两轮间插入机器人消息仍能正确定位新指令 OK")
+
+# ---- 场景 13：系统/时间消息不触发处理 ----
+sim = PollSim()
+hist = [fr("Silence", "旧1")]
+sim.seed("Silence", hist)
+got = sim.poll_once("Silence", hist + [_Msg('system', 'system', 'other', 'xxx 撤回了一条消息'),
+                                       _Msg('time', 'time', 'time', '2026-09-10 18:00:00')])
+assert got == [], f"场景13 失败（系统/时间消息不应触发）: {got}"
+print("场景13 系统/时间消息不触发处理 OK")
 
 print("\n全部回归场景通过 ✅")
