@@ -1,0 +1,10 @@
+# 微信内核（免费版，必装）
+wxauto4
+
+# 面板
+fastapi==0.115.6
+uvicorn==0.34.0
+
+# 网络与加密
+requests==2.32.3
+cryptography==44.0.0

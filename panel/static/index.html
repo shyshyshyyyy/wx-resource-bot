@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>资源搜索机器人 · 控制台</title>
+<style>
+:root{
+  --bg:#E4E8EC; --panel:#FFFFFF; --band:#141D26;
+  --ink:#0E151C; --muted:#6B7A88; --line:#CBD4DC;
+  --signal:#DC5411; --ok:#12854A; --bad:#B8232A; --warn:#B57400;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+  --sans:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.6}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+
+/* ---- 状态灯带：签名元素 ---- */
+.rail{background:var(--band);color:#DCE4EC;padding:10px 20px;display:flex;
+      align-items:center;gap:26px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+.rail h1{font-size:15px;font-weight:800;letter-spacing:.14em;margin:0 18px 0 0;white-space:nowrap}
+.lamp{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;
+      letter-spacing:.08em;text-transform:uppercase;color:#8FA0AF}
+.lamp b{width:9px;height:9px;background:#3B4A58;display:block}
+.lamp.on b{background:var(--ok);box-shadow:0 0 8px rgba(18,133,74,.8)}
+.lamp.run b{background:var(--signal);box-shadow:0 0 8px rgba(220,84,17,.85);
+            animation:pulse 1.6s ease-in-out infinite}
+.lamp.err b{background:var(--bad);box-shadow:0 0 8px rgba(184,35,42,.8)}
+.lamp span{color:#DCE4EC}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+@media (prefers-reduced-motion:reduce){.lamp.run b{animation:none}}
+
+.wrap{display:flex;min-height:calc(100vh - 44px)}
+nav{width:168px;background:var(--panel);border-right:1px solid var(--line);padding:14px 0;flex-shrink:0}
+nav a{display:block;padding:9px 20px;color:var(--muted);text-decoration:none;cursor:pointer;border-left:3px solid transparent}
+nav a:hover{background:#F1F4F7;color:var(--ink)}
+nav a.active{color:var(--ink);font-weight:700;border-left-color:var(--signal);background:#F1F4F7}
+main{flex:1;padding:24px 30px;max-width:1000px}
+
+h2{font-size:19px;font-weight:800;letter-spacing:.02em;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--panel);border:1px solid var(--line);padding:18px 20px;margin-bottom:16px}
+.card h3{margin:0 0 14px;font-size:13px;font-family:var(--mono);letter-spacing:.1em;
+         text-transform:uppercase;color:var(--muted);font-weight:600}
+.row{display:flex;gap:14px;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+input[type=text],input[type=password],input[type=number],select,textarea{
+  width:100%;padding:7px 10px;border:1px solid var(--line);background:#FBFCFD;border-radius:0}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--signal);outline-offset:-1px;background:#fff}
+textarea{font-family:var(--mono);font-size:13px;min-height:78px;resize:vertical}
+.field{flex:1;min-width:190px}
+.btn{padding:7px 15px;border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;font-weight:600}
+.btn:hover{background:#2A3742}
+.btn.ghost{background:transparent;color:var(--ink)}
+.btn.ghost:hover{background:#EDF1F4}
+.btn.danger{border-color:var(--bad);background:var(--bad)}
+.btn.go{border-color:var(--signal);background:var(--signal)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,nav a:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tag{display:inline-block;padding:1px 7px;font-family:var(--mono);font-size:11px;border:1px solid var(--line)}
+.tag.ok{color:var(--ok);border-color:var(--ok)}
+.tag.bad{color:var(--bad);border-color:var(--bad)}
+.tag.warn{color:var(--warn);border-color:var(--warn)}
+.mono{font-family:var(--mono)}
+.hint{font-size:12px;color:var(--muted);margin-top:5px}
+.checkline{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.checkline:last-child{border-bottom:0}
+.checkline .fix{font-size:12px;color:var(--muted);white-space:pre-wrap}
+#logbox{background:var(--band);color:#C6D2DC;font-family:var(--mono);font-size:12px;
+        padding:12px;height:440px;overflow:auto;white-space:pre-wrap}
+#logbox .lv-WARNING{color:#F0B429}
+#logbox .lv-ERROR{color:#FF7A7A}
+#toast{position:fixed;right:22px;bottom:22px;background:var(--ink);color:#fff;
+       padding:11px 17px;display:none;z-index:60;max-width:420px}
+#login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;
+       justify-content:center;z-index:80}
+#login .card{width:340px}
+.tplrow{border-bottom:1px solid var(--line);padding:14px 0}
+.tplrow:last-child{border-bottom:0}
+.keys{margin-top:6px;font-size:11px;font-family:var(--mono);color:var(--muted)}
+.keys b{color:var(--signal);font-weight:600;cursor:pointer}
+.hidden{display:none!important}
+@media(max-width:760px){.wrap{flex-direction:column}nav{width:100%;display:flex;overflow-x:auto}
+  nav a{border-left:0;border-bottom:3px solid transparent;white-space:nowrap}
+  nav a.active{border-left:0;border-bottom-color:var(--signal)}main{padding:18px}}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="card">
+    <h3>登录控制台</h3>
+    <div class="field" style="margin-bottom:10px">
+      <label>用户名</label><input type="text" id="lg-u" value="admin" autocomplete="username">
+    </div>
+    <div class="field" style="margin-bottom:14px">
+      <label>密码</label><input type="password" id="lg-p" autocomplete="current-password">
+    </div>
+    <button class="btn go" style="width:100%" onclick="doLogin()">登录</button>
+    <div class="hint" id="lg-msg"></div>
+  </div>
+</div>
+
+<div class="rail">
+  <h1>资源搜索机器人</h1>
+  <div class="lamp" id="lamp-bot"><b></b><span>机器人</span></div>
+  <div class="lamp" id="lamp-core"><b></b><span>内核</span></div>
+  <div class="lamp" id="lamp-pansou"><b></b><span>盘搜</span></div>
+  <div class="lamp" id="lamp-acc"><b></b><span>转存账号</span></div>
+  <div class="lamp" id="lamp-lic"><b></b><span>授权</span></div>
+  <div style="margin-left:auto;display:flex;gap:8px">
+    <button class="btn go" id="btn-start" onclick="botCtl('start')">启动</button>
+    <button class="btn ghost" style="color:#DCE4EC;border-color:#3B4A58" onclick="botCtl('stop')">停止</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <nav>
+    <a data-tab="overview" class="active">概览</a>
+    <a data-tab="wechat">微信</a>
+    <a data-tab="search">盘搜</a>
+    <a data-tab="accounts">转存账号</a>
+    <a data-tab="templates">消息模板</a>
+    <a data-tab="license">授权</a>
+    <a data-tab="logs">日志</a>
+  </nav>
+  <main>
+
+    <section id="tab-overview">
+      <h2>概览</h2>
+      <p class="sub">机器人当前状态与运行环境检查。</p>
+      <div class="card"><h3>环境自检</h3><div id="envlist"></div></div>
+      <div class="card"><h3>运行统计</h3><div id="stats"></div></div>
+    </section>
+
+    <section id="tab-wechat" class="hidden">
+      <h2>微信</h2>
+      <p class="sub">选择内核、设置监听范围和触发词。</p>
+      <div class="card">
+        <h3>内核</h3>
+        <div class="row">
+          <div class="field"><label>使用哪个内核</label>
+            <select id="wx-core">
+              <option value="auto">自动（装了 wxautox4 且已激活就用 Plus，否则用免费版）</option>
+              <option value="free">强制免费版 wxauto4</option>
+              <option value="plus">强制 Plus 版 wxautox4</option>
+            </select></div>
+          <div class="field"><label>微信昵称（多开时指定，仅 Plus 版有效）</label>
+            <input type="text" id="wx-nick" placeholder="留空则使用默认实例"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>回复间隔（毫秒）</label>
+            <input type="number" id="wx-interval" min="0" step="100">
+            <div class="hint">两条消息之间的最小间隔。调低会更快，但被风控的概率上升。</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>监听范围</h3>
+        <div class="row">
+          <div class="field"><label>监听的群（一行一个群名）</label>
+            <textarea id="wx-groups"></textarea></div>
+          <div class="field"><label>私聊白名单（一行一个，留空=所有好友）</label>
+            <textarea id="wx-white"></textarea></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>触发词（一行一个）</label>
+            <textarea id="wx-trigger" placeholder="搜索&#10;搜"></textarea>
+            <div class="hint">用户发「搜索 三体 夸克」即可触发，群里不需要 @ 机器人。</div></div>
+        </div>
+        <button class="btn" onclick="saveSection('wechat')">保存微信设置</button>
+      </div>
+    </section>
+
+    <section id="tab-search" class="hidden">
+      <h2>盘搜</h2>
+      <p class="sub">本地 pansou 随程序启动；远程接口可选，两者可以同时用并合并去重。</p>
+      <div class="card">
+        <h3>来源</h3>
+        <div class="row"><div class="field"><label>搜索来源</label>
+          <select id="s-mode">
+            <option value="local">只用本地</option>
+            <option value="remote">只用远程</option>
+            <option value="both">本地 + 远程（合并去重）</option>
+          </select></div></div>
+      </div>
+      <div class="card">
+        <h3>本地 pansou</h3>
+        <div class="row">
+          <div class="field"><label>程序路径</label><input type="text" id="s-exe"></div>
+          <div class="field"><label>端口</label><input type="number" id="s-port"></div>
+        </div>
+        <div class="row"><div class="field"><label>TG 频道（逗号分隔）</label>
+          <input type="text" id="s-channels"></div></div>
+        <div class="row" style="gap:8px">
+          <button class="btn ghost" onclick="pansouCtl('start')">启动</button>
+          <button class="btn ghost" onclick="pansouCtl('restart')">重启</button>
+          <button class="btn ghost" onclick="pansouCtl('stop')">停止</button>
+          <span id="pansou-state" class="mono" style="align-self:center"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>远程接口</h3>
+        <div class="row">
+          <div class="field"><label>接口地址</label>
+            <input type="text" id="s-url" placeholder="https://so.example.com"></div>
+          <div class="field"><label>Token（没有就留空）</label>
+            <input type="text" id="s-token"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>结果</h3>
+        <div class="row">
+          <div class="field"><label>每页条数</label><input type="number" id="s-pagesize"></div>
+          <div class="field"><label>最多取多少条</label><input type="number" id="s-max"></div>
+          <div class="field"><label>选号超时（秒）</label><input type="number" id="s-ttl"></div>
+        </div>
+        <div class="row" style="gap:8px">
+          <button class="btn" onclick="saveSection('search')">保存盘搜设置</button>
+          <button class="btn ghost" onclick="testSearch()">试搜一次</button>
+        </div>
+        <pre id="s-test" class="mono hint"></pre>
+      </div>
+    </section>
+
+    <section id="tab-accounts" class="hidden">
+      <h2>转存账号</h2>
+      <p class="sub">同一个网盘可以配多个账号，转存时自动轮转，超日限或 Cookie 失效会跳过。</p>
+      <div class="card">
+        <h3>添加账号</h3>
+        <div class="row">
+          <div class="field"><label>网盘</label><select id="a-pan"></select></div>
+          <div class="field"><label>备注名</label><input type="text" id="a-name" placeholder="夸克主号"></div>
+          <div class="field"><label>每日转存上限</label><input type="number" id="a-limit" value="200"></div>
+        </div>
+        <div class="row"><div class="field"><label id="a-cred-label">Cookie</label>
+          <textarea id="a-cookie"></textarea>
+          <div class="hint" id="a-cred-hint"></div></div></div>
+        <div class="row">
+          <div class="field"><label>转存目录 ID（留空=根目录）</label>
+            <input type="text" id="a-savedir" placeholder="添加账号后可点「选目录」挑选"></div>
+          <div class="field"><label>广告关键词（逗号分隔，转存后命中即删）</label>
+            <input type="text" id="a-banned" placeholder="加群,推广,最新地址"></div>
+        </div>
+        <button class="btn" onclick="addAccount()">添加</button>
+      </div>
+      <div class="card">
+        <h3>已配置</h3>
+        <table><thead><tr><th>网盘</th><th>备注</th><th>状态</th><th>今日用量</th>
+          <th>转存目录</th><th>操作</th></tr></thead>
+          <tbody id="acc-body"></tbody></table>
+      </div>
+    </section>
+
+    <section id="tab-templates" class="hidden">
+      <h2>消息模板</h2>
+      <p class="sub">改完点保存即时生效。点击占位符可插入到光标处。</p>
+      <div class="card"><div id="tpl-list"></div>
+        <button class="btn" style="margin-top:14px" onclick="saveTemplates()">保存模板</button></div>
+    </section>
+
+    <section id="tab-license" class="hidden">
+      <h2>授权</h2>
+      <p class="sub">本程序的授权与 wxautox4 内核的授权是两套，分别填写。</p>
+      <div class="card">
+        <h3>本程序授权</h3>
+        <div class="row"><div class="field"><label>本机机器码（发给管理员生成激活码）</label>
+          <input type="text" id="lic-machine" readonly class="mono"></div>
+          <div style="align-self:flex-end"><button class="btn ghost" onclick="copyMachine()">复制</button></div></div>
+        <div class="row"><div class="field"><label>激活码</label>
+          <textarea id="lic-code" placeholder="粘贴激活码"></textarea></div></div>
+        <button class="btn go" onclick="activate()">激活</button>
+        <div class="hint" id="lic-state"></div>
+      </div>
+      <div class="card">
+        <h3>wxautox4 内核授权</h3>
+        <div class="hint" id="core-state"></div>
+        <div class="row" style="margin-top:10px"><div class="field"><label>内核激活码</label>
+          <input type="text" id="core-code" placeholder="在 wxauto.org 购买后填这里"></div></div>
+        <button class="btn ghost" onclick="activateCore()">激活内核</button>
+        <div class="hint">未激活也能用，会自动回落到免费版 wxauto4，只是没有后台模式等 Plus 功能。</div>
+      </div>
+      <div class="card">
+        <h3>面板密码</h3>
+        <div class="row"><div class="field"><label>新密码（至少 8 位）</label>
+          <input type="password" id="pw-new"></div></div>
+        <button class="btn" onclick="changePw()">修改密码</button>
+      </div>
+    </section>
+
+    <section id="tab-logs" class="hidden">
+      <h2>日志</h2>
+      <p class="sub">实时输出。排查问题时把这里的内容截图发给管理员。</p>
+      <div class="card"><div id="logbox"></div></div>
+    </section>
+
+  </main>
+</div>
+<div id="toast"></div>
+
+<script>
+let CFG={}, TPLHELP={}, PANS=[];
+
+function toast(msg,ms=2600){const t=document.getElementById('toast');
+  t.textContent=msg;t.style.display='block';clearTimeout(t._h);
+  t._h=setTimeout(()=>t.style.display='none',ms);}
+
+async function api(path,opt={}){
+  const r=await fetch(path,{credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},...opt});
+  if(r.status===401){document.getElementById('login').style.display='flex';throw new Error('未登录');}
+  if(!r.ok){const e=await r.json().catch(()=>({detail:r.statusText}));throw new Error(e.detail||'请求失败');}
+  return r.json();
+}
+const post=(p,b)=>api(p,{method:'POST',body:JSON.stringify(b||{})});
+
+async function doLogin(){
+  const msg=document.getElementById('lg-msg');
+  try{
+    const r=await post('/api/login',{username:document.getElementById('lg-u').value,
+      password:document.getElementById('lg-p').value});
+    document.getElementById('login').style.display='none';
+    if(r.must_change_password) toast('你还在用默认密码，去「授权」页改掉它。',5000);
+    boot();
+  }catch(e){msg.textContent=e.message;}
+}
+
+/* ---- 导航 ---- */
+document.querySelectorAll('nav a').forEach(a=>a.onclick=()=>{
+  document.querySelectorAll('nav a').forEach(x=>x.classList.remove('active'));
+  a.classList.add('active');
+  document.querySelectorAll('main section').forEach(s=>s.classList.add('hidden'));
+  document.getElementById('tab-'+a.dataset.tab).classList.remove('hidden');
+  if(a.dataset.tab==='logs') loadLogs();
+  if(a.dataset.tab==='accounts') loadAccounts();
+});
+
+/* ---- 灯带 ---- */
+function setLamp(id,state,label){
+  const el=document.getElementById(id);
+  el.className='lamp '+state;
+  el.querySelector('span').textContent=label;
+}
+
+async function refresh(){
+  let o;try{o=await api('/api/overview');}catch(e){return;}
+  const b=o.bot||{};
+  setLamp('lamp-bot', b.running?'run':'', b.running?'运行中':'已停止');
+  const core=(b.wechat||{}).core_label||'未连接';
+  setLamp('lamp-core', (b.wechat||{}).connected?'on':'', core.replace('（','·').replace('）',''));
+  const ps=o.pansou||{};
+  setLamp('lamp-pansou', ps.running?'on':(ps.available?'':'err'),
+          ps.running?('盘搜 '+ps.port):(ps.available?'盘搜 未启动':'盘搜 缺文件'));
+  const total=Object.values(o.accounts||{}).reduce((a,c)=>a+c,0);
+  setLamp('lamp-acc', total?'on':'err', '账号 '+total);
+  setLamp('lamp-lic', o.license.ok?'on':'err',
+    o.license.ok?(o.license.days_left<0?'永久':o.license.days_left+' 天'):'未激活');
+  document.getElementById('btn-start').disabled=!!b.running;
+
+  // 环境自检
+  const box=document.getElementById('envlist');
+  box.innerHTML=(o.env.items||[]).map(i=>{
+    const cls=i.level==='ok'?'ok':(i.level==='warn'?'warn':'bad');
+    const txt=i.level==='ok'?'正常':(i.level==='warn'?'注意':'阻断');
+    return `<div class="checkline"><span class="tag ${cls}" style="flex-shrink:0">${txt}</span>
+      <div><b>${i.name}</b> — ${i.detail}${i.fix?`<div class="fix">${i.fix}</div>`:''}</div></div>`;
+  }).join('');
+
+  document.getElementById('stats').innerHTML=
+    `<table><tr><th>搜索次数</th><td>${b.searches||0}</td>
+      <th>成功转存</th><td>${b.transfers||0}</td>
+      <th>转存失败</th><td>${b.failures||0}</td>
+      <th>活跃会话</th><td>${b.active_sessions||0}</td></tr></table>`;
+  document.getElementById('pansou-state').textContent=
+    ps.running?('运行中 · '+ps.base_url):(ps.error||'未运行');
+}
+
+/* ---- 配置 ---- */
+function lines(v){return (v||'').split('\n').map(s=>s.trim()).filter(Boolean);}
+function fill(){
+  const w=CFG.wechat||{},s=CFG.search||{};
+  document.getElementById('wx-core').value=w.core||'auto';
+  document.getElementById('wx-nick').value=w.nickname||'';
+  document.getElementById('wx-interval').value=w.reply_interval_ms||1200;
+  document.getElementById('wx-groups').value=(w.listen_groups||[]).join('\n');
+  document.getElementById('wx-white').value=(w.whitelist||[]).join('\n');
+  document.getElementById('wx-trigger').value=(w.triggers||['搜索','搜']).join('\n');
+  document.getElementById('s-mode').value=s.mode||'local';
+  document.getElementById('s-exe').value=(s.local||{}).exe||'';
+  document.getElementById('s-port').value=(s.local||{}).port||8888;
+  document.getElementById('s-channels').value=(s.local||{}).channels||'';
+  document.getElementById('s-url').value=(s.remote||{}).base_url||'';
+  document.getElementById('s-token').value=(s.remote||{}).token||'';
+  document.getElementById('s-pagesize').value=s.page_size||8;
+  document.getElementById('s-max').value=s.max_results||60;
+  document.getElementById('s-ttl').value=s.session_ttl||300;
+}
+async function saveSection(name){
+  let body;
+  if(name==='wechat'){
+    body={core:document.getElementById('wx-core').value,
+      nickname:document.getElementById('wx-nick').value,
+      reply_interval_ms:+document.getElementById('wx-interval').value,
+      listen_groups:lines(document.getElementById('wx-groups').value),
+      whitelist:lines(document.getElementById('wx-white').value),
+      triggers:lines(document.getElementById('wx-trigger').value)};
+  }else{
+    const url=document.getElementById('s-url').value.trim();
+    body={mode:document.getElementById('s-mode').value,
+      page_size:+document.getElementById('s-pagesize').value,
+      max_results:+document.getElementById('s-max').value,
+      session_ttl:+document.getElementById('s-ttl').value,
+      local:{enabled:true,exe:document.getElementById('s-exe').value,
+        port:+document.getElementById('s-port').value,
+        channels:document.getElementById('s-channels').value},
+      remote:{enabled:!!url,base_url:url,
+        token:document.getElementById('s-token').value}};
+  }
+  await post('/api/config/'+name,body);
+  toast('已保存');CFG=await api('/api/config');
+}
+
+async function pansouCtl(a){const r=await post('/api/pansou/'+a);toast(r.msg);refresh();}
+async function botCtl(a){
+  try{const r=await post('/api/bot/'+a);toast(r.msg);}catch(e){toast(e.message,4000);}
+  refresh();
+}
+async function testSearch(){
+  document.getElementById('s-test').textContent='搜索中…';
+  const r=await post('/api/search/test',{kw:'测试'});
+  document.getElementById('s-test').textContent=
+    `找到 ${r.count} 条` + (r.errors.length?`\n错误：${r.errors.join('；')}`:'') +
+    '\n' + r.sample.map(x=>`· [${x.pan}] ${x.title}`).join('\n');
+}
+
+/* ---- 账号 ---- */
+async function loadAccounts(){
+  const r=await api('/api/accounts');PANS=r.pans;
+  const sel=document.getElementById('a-pan');
+  sel.innerHTML=r.pans.map(p=>`<option value="${p.key}">${p.name}${p.supported?'':'（适配器待接入）'}</option>`).join('');
+  sel.onchange=credHint; credHint();
+  document.getElementById('acc-body').innerHTML=r.accounts.map(a=>{
+    const st=a.status==='ok'?'<span class="tag ok">正常</span>':
+      (a.status==='invalid'?'<span class="tag bad">失效</span>':'<span class="tag">未检测</span>');
+    const pn=(r.pans.find(p=>p.key===a.pan)||{}).name||a.pan;
+    return `<tr><td>${pn}</td><td>${a.name||''}</td><td>${st}</td>
+      <td class="mono">${a.used_today||0}/${a.daily_limit||'∞'}</td>
+      <td>${a.save_dir_name||'<span class="hint">根目录</span>'}</td>
+      <td><button class="btn ghost" onclick="checkAcc('${a.id}')">检测</button>
+          <button class="btn ghost danger" style="color:var(--bad);background:none"
+            onclick="delAcc('${a.id}')">删除</button></td></tr>`;
+  }).join('')||'<tr><td colspan="6" class="hint">还没有账号。上面加一个，转存功能才能用。</td></tr>';
+}
+const CRED={
+  quark:['Cookie','登录 pan.quark.cn，F12 → Network → 任意请求 → 复制完整 Cookie'],
+  uc:['Cookie','登录 drive.uc.cn，F12 → Network → 任意请求 → 复制完整 Cookie'],
+  baidu:['Cookie','登录 pan.baidu.com，Cookie 里必须包含 BDUSS 和 STOKEN'],
+  xunlei:['refresh_token','迅雷不用 Cookie。F12 → Application → Local Storage → 找 refresh_token'],
+  aliyun:['refresh_token','阿里不用 Cookie。F12 → Application → Local Storage → token → refresh_token'],
+  guangya:['refresh_token','光鸭已接入：填 refresh_token（gy. 开头，不是 Cookie、也不是 eyJ 的 access_token）。点「手机验证码登录」可用手机号+短信自动获取；提示 token does not match 时填设备ID与官网一致'],
+};
+function credHint(){
+  const k=document.getElementById('a-pan').value, c=CRED[k]||['Cookie',''];
+  document.getElementById('a-cred-label').textContent=c[0];
+  document.getElementById('a-cred-hint').textContent=c[1];
+  document.getElementById('a-cookie').placeholder='粘贴'+c[0];
+}
+async function addAccount(){
+  const cookie=document.getElementById('a-cookie').value.trim();
+  if(!cookie) return toast('Cookie 不能为空');
+  await post('/api/accounts',{pan:document.getElementById('a-pan').value,
+    name:document.getElementById('a-name').value||'未命名',
+    daily_limit:+document.getElementById('a-limit').value,
+    save_dir_id:document.getElementById('a-savedir').value.trim(),
+    banned_words:document.getElementById('a-banned').value.trim(),
+    cookie,enabled:true});
+  document.getElementById('a-cookie').value='';
+  document.getElementById('a-name').value='';
+  document.getElementById('a-savedir').value='';
+  toast('已添加');loadAccounts();refresh();
+}
+async function checkAcc(id){const r=await post(`/api/accounts/${id}/check`);
+  toast(r.msg||(r.ok?'正常':'失效'),4000);loadAccounts();}
+async function delAcc(id){if(!confirm('删除这个账号？'))return;
+  await api('/api/accounts/'+id,{method:'DELETE'});loadAccounts();refresh();}
+
+/* ---- 模板 ---- */
+async function loadTemplates(){
+  const r=await api('/api/templates');TPLHELP=r.help;
+  const NAMES={search_hint:'指令格式提示',searching:'开始搜索',no_result:'没有结果',
+    result_header:'结果列表 · 抬头',result_item:'结果列表 · 每条',result_footer:'结果列表 · 页脚',
+    getting:'开始取资源',success:'取资源成功',password_line:'提取码行',
+    transfer_failed:'转存失败回落',expired:'会话过期',invalid_index:'序号无效',
+    no_account:'没有可用账号',unlicensed:'未激活'};
+  document.getElementById('tpl-list').innerHTML=Object.keys(r.values).map(k=>{
+    const keys=(r.help[k]||[]).map(h=>
+      `<b title="${h.desc}" onclick="insertKey('tpl-${k}','{${h.key}}')">{${h.key}}</b>`).join(' ');
+    return `<div class="tplrow"><label>${NAMES[k]||k}</label>
+      <textarea id="tpl-${k}" data-key="${k}">${r.values[k]||''}</textarea>
+      <div class="keys">${keys||'（这条不支持占位符）'}</div></div>`;
+  }).join('');
+}
+function insertKey(id,txt){
+  const el=document.getElementById(id),s=el.selectionStart;
+  el.value=el.value.slice(0,s)+txt+el.value.slice(el.selectionEnd);
+  el.focus();el.selectionStart=el.selectionEnd=s+txt.length;
+}
+async function saveTemplates(){
+  const body={};
+  document.querySelectorAll('[id^=tpl-]').forEach(t=>body[t.dataset.key]=t.value);
+  const r=await post('/api/templates',body);
+  if(!r.ok){
+    const first=Object.entries(r.problems)[0];
+    return toast(`「${first[0]}」里有认不出的占位符：${first[1].join('、')}`,5000);
+  }
+  toast('模板已生效');
+}
+
+/* ---- 授权 ---- */
+async function loadLicense(){
+  const r=await api('/api/license');
+  document.getElementById('lic-machine').value=r.machine;
+  document.getElementById('lic-state').textContent=
+    r.info.msg + (r.days_left>=0?`（剩余 ${r.days_left} 天）`:'（永久）');
+  document.getElementById('core-state').innerHTML= r.core.activated
+    ? '<span class="tag ok">已激活</span> 当前可使用 Plus 版全部功能'
+    : '<span class="tag warn">未激活</span> ' + (r.core.detail||'');
+}
+function copyMachine(){
+  navigator.clipboard.writeText(document.getElementById('lic-machine').value);
+  toast('机器码已复制');
+}
+async function activate(){
+  const r=await post('/api/license',{code:document.getElementById('lic-code').value});
+  toast(r.msg,4000);loadLicense();refresh();
+}
+async function activateCore(){
+  const r=await post('/api/core/activate',{code:document.getElementById('core-code').value});
+  toast(r.msg||(r.ok?'内核已激活':'激活失败'),5000);loadLicense();
+}
+async function changePw(){
+  const v=document.getElementById('pw-new').value;
+  try{await post('/api/panel/password',{password:v});toast('密码已修改');
+    document.getElementById('pw-new').value='';}
+  catch(e){toast(e.message);}
+}
+
+/* ---- 日志 ---- */
+let logES=null;
+function renderLogs(items,append){
+  const box=document.getElementById('logbox');
+  const html=items.map(l=>`<div class="lv-${l.lv}">${l.t} [${l.src}] ${l.msg}</div>`).join('');
+  if(append) box.insertAdjacentHTML('beforeend',html); else box.innerHTML=html;
+  box.scrollTop=box.scrollHeight;
+}
+async function loadLogs(){
+  const r=await api('/api/logs');renderLogs(r.lines,false);
+  if(logES) return;
+  logES=new EventSource('/api/logs/stream');
+  logES.onmessage=e=>renderLogs(JSON.parse(e.data),true);
+  logES.onerror=()=>{logES.close();logES=null;};
+}
+
+/* ---- 启动 ---- */
+async function boot(){
+  CFG=await api('/api/config');fill();
+  await loadTemplates();await loadLicense();await refresh();
+  setInterval(refresh,5000);
+}
+api('/api/overview').then(()=>{document.getElementById('login').style.display='none';boot();})
+  .catch(()=>{});
+</script>
+</body>
+</html>

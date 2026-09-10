@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="lUR4TWPHG3d1dlRSSQj5yC">
+<head data-page-node-id="2bWjWkvAEXEWN6ZJ32Lagx">
+<meta charset="UTF-8" data-page-node-id="hwE2agcREi7XaGRfoAB5RM">
+<title>微信资源搜索机器人 · 界面线框图</title>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#ffffff; --side:#fbfbfc;
+  --line:#e3e5e9; --line2:#eef0f3;
+  --tx:#1f2329; --tx2:#5f6672; --tx3:#8a909c;
+  --pri:#2f6fed; --pri-bg:#eef3ff;
+  --ok:#18a058; --ok-bg:#eaf7f0;
+  --warn:#e8912a; --warn-bg:#fdf3e6;
+  --err:#d93026; --err-bg:#fdeeed;
+  --r:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+     background:var(--bg);color:var(--tx);display:flex;height:100vh;overflow:hidden}
+/* ---------- 侧边导航 ---------- */
+.side{width:196px;background:var(--side);border-right:1px solid var(--line);
+      display:flex;flex-direction:column;flex-shrink:0}
+.brand{padding:16px 16px 12px;border-bottom:1px solid var(--line2)}
+.brand b{font-size:14px;font-weight:600;display:block}
+.brand span{font-size:11px;color:var(--tx3)}
+.nav{flex:1;padding:8px 0;overflow-y:auto}
+.nav button{width:100%;text-align:left;padding:9px 16px;border:0;background:none;
+  font:inherit;color:var(--tx2);cursor:pointer;border-left:2px solid transparent}
+.nav button:hover{background:#f0f2f5;color:var(--tx)}
+.nav button.on{background:var(--pri-bg);color:var(--pri);border-left-color:var(--pri);font-weight:500}
+.nav .grp{padding:12px 16px 4px;font-size:11px;color:var(--tx3);letter-spacing:.5px}
+/* ---------- 主区 ---------- */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.top{height:56px;background:var(--panel);border-bottom:1px solid var(--line);
+     display:flex;align-items:center;gap:14px;padding:0 18px;flex-shrink:0}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--tx3)}
+.dot.on{background:var(--ok);box-shadow:0 0 0 3px var(--ok-bg)}
+.dot.err{background:var(--err);box-shadow:0 0 0 3px var(--err-bg)}
+.wxst{font-size:12px;color:var(--tx2)}
+.wxst b{color:var(--tx);font-weight:500}
+.spacer{flex:1}
+.btn{padding:7px 16px;border:1px solid var(--line);background:#fff;border-radius:var(--r);
+     font:inherit;cursor:pointer;color:var(--tx)}
+.btn:hover{border-color:#c9ccd3}
+.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff;font-weight:500}
+.btn.pri:disabled{background:#c3d2f5;border-color:#c3d2f5;cursor:not-allowed}
+.btn.sm{padding:4px 10px;font-size:12px}
+.body{flex:1;overflow-y:auto;padding:18px}
+.page{display:none}
+.page.on{display:block}
+h2{font-size:15px;font-weight:600;margin-bottom:4px}
+.sub{font-size:12px;color:var(--tx3);margin-bottom:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+      padding:16px;margin-bottom:14px}
+.card h3{font-size:13px;font-weight:600;margin-bottom:12px;
+         padding-bottom:8px;border-bottom:1px solid var(--line2)}
+/* ---------- 表单 ---------- */
+.row{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.row:last-child{margin-bottom:0}
+.lb{width:104px;flex-shrink:0;color:var(--tx2);font-size:12px}
+.in{flex:1;padding:6px 9px;border:1px solid var(--line);border-radius:6px;
+    font:inherit;background:#fff;color:var(--tx);min-width:0}
+.in:focus{outline:0;border-color:var(--pri)}
+textarea.in{font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.7}
+.sw{width:34px;height:19px;border-radius:10px;background:#d4d7dd;position:relative;
+    cursor:pointer;flex-shrink:0;transition:.15s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;
+           border-radius:50%;background:#fff;transition:.15s}
+.sw.on{background:var(--pri)}
+.sw.on::after{left:17px}
+.hint{font-size:11px;color:var(--tx3);margin-top:3px}
+/* ---------- 表格 ---------- */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:7px 9px;background:#fafbfc;color:var(--tx2);
+   font-weight:500;border-bottom:1px solid var(--line)}
+td{padding:7px 9px;border-bottom:1px solid var(--line2)}
+tr:last-child td{border-bottom:0}
+.tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.err{background:var(--err-bg);color:var(--err)}
+.tag.n{background:#f0f2f5;color:var(--tx2)}
+.chip{display:inline-block;padding:3px 10px;border:1px solid var(--line);
+      border-radius:14px;font-size:12px;margin:0 6px 6px 0;cursor:pointer;background:#fff}
+.chip.on{background:var(--pri-bg);border-color:var(--pri);color:var(--pri)}
+/* ---------- 日志 ---------- */
+.log{background:#1f2329;color:#c8ccd4;border-radius:var(--r);padding:12px;
+     font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.8;
+     height:320px;overflow-y:auto}
+.log .i{color:#8a909c}.log .w{color:#e8b04b}.log .e{color:#f0736a}.log .s{color:#5fc98f}
+/* ---------- 激活卡 ---------- */
+.act{display:flex;gap:22px;align-items:center}
+.mcode{font-family:ui-monospace,Consolas,monospace;font-size:19px;letter-spacing:1px;
+       background:#f7f8fa;border:1px dashed var(--line);border-radius:6px;
+       padding:9px 14px;color:var(--tx)}
+.kv{display:flex;gap:26px}
+.kv div{font-size:12px;color:var(--tx3)}
+.kv b{display:block;font-size:15px;color:var(--tx);font-weight:600;margin-top:2px}
+.note{background:var(--warn-bg);border:1px solid #f5dcbb;border-radius:6px;
+      padding:9px 12px;font-size:12px;color:#8a5a12;margin-bottom:14px}
+</style>
+</head>
+<body data-page-node-id="BGzZNIZnwsFmEkR7CTmpTd">
+
+<div class="side" data-page-node-id="LEx8ZMkvPYW9QYXKFBlFfn">
+  <div class="brand" data-page-node-id="9e8u4dMxX5iEay6Qqu1ndd"><b data-page-node-id="0OSSxgiFv1zWoST1uj83HS">微信资源搜索机器人</b><span data-page-node-id="4Nc6MAeQgk7fxJABD7daiK">WeChat Resource Bot</span></div>
+  <div class="nav" data-page-node-id="AoonEiBUfpqIrButsXRRFX">
+    <div class="grp" data-page-node-id="NbOKW1nq1mi3IR7BH252ud">授权</div>
+    <button class="on" data-p="p1" data-page-node-id="ADw1WcPDanRNJnx6NAqwHD">授权激活</button>
+    <div class="grp" data-page-node-id="rMsDn87s79KDnU4v7yg0Aa">运行</div>
+    <button data-p="p2" data-page-node-id="7kEAog68nxiSQj8cBBaTvx">运行状态</button>
+    <button data-p="p3" data-page-node-id="kWuaitA518ZLRZpQ5PCKJW">微信与触发</button>
+    <div class="grp" data-page-node-id="XLQsSXfTwyFuDtkmg4TBUE">资源</div>
+    <button data-p="p4" data-page-node-id="K8ILYZDPTUwCu9QKWtMyIh">网盘账号</button>
+    <button data-p="p5" data-page-node-id="1usLJnsGqI84npGIS7AFge">盘搜接口</button>
+    <button data-p="p6" data-page-node-id="zqzEDL7NB65T0P0xvFxTxO">转链群发</button>
+    <div class="grp" data-page-node-id="ahk6Q1dE96OFOU0uKOoBPx">话术</div>
+    <button data-p="p7" data-page-node-id="Kho22BN6WMYCI3HAJjp7De">消息模板</button>
+    <button data-p="p8" data-page-node-id="PK1DAuUHzEqbAOyGGSCvDn">AI 对话</button>
+    <div class="grp" data-page-node-id="3OuFmfZMDh3Aqdg01JkdYC">系统</div>
+    <button data-p="p9" data-page-node-id="wTFuqsTKtb6nd7WCMOlJVS">运行日志</button>
+    <button data-p="p10" data-page-node-id="dlDWUyycP9ZE3woi0yfo1n">关于</button>
+  </div>
+</div>
+
+<div class="main" data-page-node-id="OyxDTfU7yvc1i1ujs7Edzm">
+  <div class="top" data-page-node-id="EdrNkCUEwe28nWSidB4kv2">
+    <span class="dot on" data-page-node-id="WviczFqLMHEv60ItEGZPjO"></span>
+    <span class="wxst" data-page-node-id="2SSbXLs1J8MTlxIfECkT6C">微信 <b data-page-node-id="EEX7bj4slf0yysE1O5Oxy1">已连接</b> · 内核 <b data-page-node-id="DSjCyZ3phHrVCON99BodmO">Plus 版 wxautox4</b> · 在线</span>
+    <span class="spacer" data-page-node-id="ojW3GCtYALCH3vl6Fc3xNs"></span>
+    <button class="btn" data-page-node-id="fOxpRRW1MgBCbiapYGbkGM">重启</button>
+    <button class="btn pri" data-page-node-id="MUYiNapyPAUBeRNAz5cEsK">停止运行</button>
+  </div>
+
+  <div class="body" data-page-node-id="Wj6viz4IpU1r3mPYlgEgXo">
+
+  <!-- 1 授权激活 -->
+  <div class="page on" id="p1" data-page-node-id="P10WIwYDdftRlSbeibYe7P">
+    <h2 data-page-node-id="pofGOHDcGMFZDO0RHnf5wK">授权激活</h2>
+    <div class="sub" data-page-node-id="EX2Lg0XBYtJEG3W7nL7cf5">离线 RSA-2048 授权，机器码绑定，沿用你现有签发器</div>
+    <div class="card" data-page-node-id="PoTqa914Wfe483J6S1o3nd">
+      <h3 data-page-node-id="kEb4eRn2TmZRrB36e6sZix">当前授权状态</h3>
+      <div class="act" data-page-node-id="Q0GclEKMvtvifsm2ubL539">
+        <div class="kv" data-page-node-id="1dl4V1yjYDwC44BncAaZEZ">
+          <div data-page-node-id="tEnuDbBMMj6rUEsGWvDLKJ">状态<b style="color:var(--ok)" data-page-node-id="8UicH3agg0rJZqU9Sp0IRD">已激活</b></div>
+          <div data-page-node-id="N67H4F1TbO2e5jcuQOAiTp">剩余<b data-page-node-id="5cBaJIaCdChk1pKEWd6bSY">351 天</b></div>
+          <div data-page-node-id="4rdJDjTJuuJGxjcB428G9f">到期<b data-page-node-id="cF5zopcW31Llw0actE6Hbg">2027-08-25</b></div>
+          <div data-page-node-id="JMLFHj6Jzht9aCB5PGiTgW">等级<b data-page-node-id="gkVCw0lI2yrArNtPABDtLL">专业版</b></div>
+        </div>
+      </div>
+    </div>
+    <div class="card" data-page-node-id="5lzyEKw1bbMjkBlKAREsU9">
+      <h3 data-page-node-id="D3ZHCmiJOH0qBS6eJy0ymB">本机机器码</h3>
+      <div class="row" data-page-node-id="20BgNE2iqbD7y3QrDjNoM7"><div class="mcode" data-page-node-id="xH0egAhdyMXV4IbsanCSVX">04AE-F3B8-B0DD-3E7D</div>
+        <button class="btn sm" data-page-node-id="A5HaHcofL57um3V78k2OfZ">复制</button>
+        <button class="btn sm" data-page-node-id="jAp0WHTEUgcE3qylL9TeFs">导出</button></div>
+      <div class="hint" data-page-node-id="W4CZMQUbfUKITtq9zxM7IY">把机器码发给管理员换取授权码。硬件小改动（换网卡/加硬盘）不会掉授权。</div>
+    </div>
+    <div class="card" data-page-node-id="5Gf7x9IQ73GhZGD1STqcrG">
+      <h3 data-page-node-id="owCw5RCy5jLXlYzGxBrF4q">激活</h3>
+      <div class="row" data-page-node-id="0yjknRRoHdkjUB8k28nK2d"><div class="lb" data-page-node-id="idsRTT90NEkZfBeTU35COX">授权码</div>
+        <textarea class="in" rows="3" placeholder="粘贴授权码（base64url payload.signature）"></textarea></div>
+      <div class="row" data-page-node-id="OxMZGtRZcvGkhLIt05eP2r"><div class="lb" data-page-node-id="HQOMy3mWgvAycktbCtS6VC"></div><button class="btn pri" data-page-node-id="Jz8B6e6ZiuuSQQFeG8Ie6a">激活</button></div>
+    </div>
+  </div>
+
+  <!-- 2 运行状态 -->
+  <div class="page" id="p2" data-page-node-id="qJYmXHYoXR1giD8WsUMZAG">
+    <h2 data-page-node-id="04eJQfsYXtUwI8ANgmT0ZO">运行状态</h2>
+    <div class="sub" data-page-node-id="FMhyedaHyLM5bNrAoYj3bG">5 秒自动刷新</div>
+    <div class="card" data-page-node-id="wsR2dCozBsb2t40lAAdJYl">
+      <h3 data-page-node-id="0uOcl0hQ633sreXbesaKRL">概览</h3>
+      <div class="kv" style="margin-bottom:14px" data-page-node-id="Opq10dJaH8GNg8V2XyMbmK">
+        <div data-page-node-id="vamxEh7GcsVRRnrgs0C3jN">运行<b style="color:var(--ok)" data-page-node-id="f3W5ET6EjlOq7XLJSjT3je">运行中</b></div>
+        <div data-page-node-id="byXvXK4jGQDbtVVZlTzXdx">已收消息<b data-page-node-id="9P48S2BCHVoaTXEzpZm1tb">1,284</b></div>
+        <div data-page-node-id="QlpusDIBaHQhqDEyueR27b">搜索次数<b data-page-node-id="HbaIrIwXhTBQ4jDBifcbM8">376</b></div>
+        <div data-page-node-id="FeXUqRvj6AFf6Bf8Vbs7sz">转存成功<b data-page-node-id="4MvEv5Al4FYfQCXEr0od5f">291</b></div>
+        <div data-page-node-id="LYDANEIQqUMMqSUdJRrMVI">失败<b data-page-node-id="IOvUdLyMuhuREIB1jIBRV9">7</b></div>
+        <div data-page-node-id="QO79WsRM9DEmA5LGL8mUdX">在线时长<b data-page-node-id="VplrHL1GmmYwHANOcUnTTE">6 天 12 小时</b></div>
+      </div>
+      <div class="kv" data-page-node-id="uw4elZ9EXjZ07wd09aypWz">
+        <div data-page-node-id="2ULH2fAARUIR6zvquCGyTs">当前内核<b data-page-node-id="70O5EgB4Z4v4SkPcgCPjwd">wxautox4 Plus</b></div>
+        <div data-page-node-id="cxpKWdPN1OW19YX6y1I4qN">监听群<b data-page-node-id="kDeIVsljYBHE0wch7pkHJu">3 个</b></div>
+        <div data-page-node-id="1bspoPJVcmDNymCY6VZCBJ">私聊白名单<b data-page-node-id="BGYEduBvmF7GKSWAwzIp3n">12 人</b></div>
+        <div data-page-node-id="2AVOeysbG1fcFf7xrd2RGQ">活跃会话<b data-page-node-id="DVKBd1pJadeoQ20BD3eWMm">2</b></div>
+      </div>
+    </div>
+    <div class="card" data-page-node-id="MiwwsgMIwKSJmtfFCX60aP">
+      <h3 data-page-node-id="tOJ8zmbQ6cHAgOutNUkAkz">环境自检</h3>
+      <table data-page-node-id="o5bI5vWXCJjZy9xPcwdnuc">
+        <tr data-page-node-id="KHtVLGKhbGyXMwlbSzYXrL"><th style="width:200px" data-page-node-id="emzDSkvSyzEzbBkHz4vEYd">检查项</th><th data-page-node-id="uWRPnn8ok8mmNHtkGLRNZn">结果</th></tr>
+        <tr data-page-node-id="HgXegWkopMxQkAnIsg8mnC"><td data-page-node-id="DgUTmEWNRnLZ9OyZhwksDb">PC 微信客户端</td><td data-page-node-id="Bh7mbE6E6AnsawvA8Y8B1F"><span class="tag ok" data-page-node-id="aTKRMnRyYoTIxUgeWpxO4Y">已登录</span> 微信 4.1.12.26</td></tr>
+        <tr data-page-node-id="wxKevsoAo2KFAsGapyCqPQ"><td data-page-node-id="1eLPIwf5uzezLbKGnqShS4">微信内核</td><td data-page-node-id="KSxqQJPnGvy8Zoum8Ggvvs"><span class="tag ok" data-page-node-id="1x7j809pCMZmdRp9wSybwV">Plus 已激活</span> wxautox4 41.1.1</td></tr>
+        <tr data-page-node-id="grgflIF1Th1LtAYGQBWFTN"><td data-page-node-id="mYWnqWNaO9ZuGctZ2x5Lu6">盘搜接口</td><td data-page-node-id="3XmBvbVqBrJlJJinjt0sWf"><span class="tag ok" data-page-node-id="BBK4ZHhvuH11Jj3Zv186lD">正常</span> 延迟 180ms</td></tr>
+        <tr data-page-node-id="HWhzD0YPMoUdBCwexq0ybI"><td data-page-node-id="vJpYUpq5v92E2t2VbMjtYn">转存账号</td><td data-page-node-id="pNzY6iXJmDDUZCgkmRl6sa"><span class="tag warn" data-page-node-id="DWoTCpicVox8gDAxpHj1vE">部分异常</span> 6 个正常 / 1 个失效</td></tr>
+        <tr data-page-node-id="WOvGLWKciR2kFceG19uH4W"><td data-page-node-id="jJID5BXMC0ZFGyaFqB2ohA">授权</td><td data-page-node-id="6Kp33zYcgGvCnRUnZ9LLJy"><span class="tag ok" data-page-node-id="aLoLLXCiEaEbROEtQfD6Qe">有效</span></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 3 微信与触发 -->
+  <div class="page" id="p3" data-page-node-id="xViR0GIBN8zrm7Ze7iQLD9">
+    <h2 data-page-node-id="jx97LrURLQkLBAcJfq6Ueb">微信与触发</h2>
+    <div class="sub" data-page-node-id="eE3HuvkkstdaxT09gIPoni">监听范围、触发方式、风控限流</div>
+    <div class="card" data-page-node-id="ZzREV6DfbynXPaPD2EG9OX">
+      <h3 data-page-node-id="XyOLspNOsjRMKNzce4aMID">内核选择</h3>
+      <div class="row" data-page-node-id="RKxtyT3pkCSGfye4z0q0RY"><div class="lb" data-page-node-id="nYsZ1l7JBwIzeDri0bqu3I">优先内核</div>
+        <span class="chip on" data-page-node-id="HmMPANrQskfM5ZrpGCWFW7">自动（Plus 优先）</span><span class="chip" data-page-node-id="c8WYagsUW1BicgMuPrqgE4">仅免费版</span><span class="chip" data-page-node-id="a3QclHGiq54RDE8sHc96AC">仅 Plus</span></div>
+      <div class="row" data-page-node-id="fXz2WFy2YcUAY1pIBjiG1Q"><div class="lb" data-page-node-id="X6ikf34LvVjAAqZxqm1Id9">wxautox4 激活</div>
+        <input class="in" placeholder="wxautox4 激活码（与上面的软件授权码是两套）" style="max-width:340px" data-page-node-id="BKBASPnPyEnhw3aEISxbBI">
+        <button class="btn sm" data-page-node-id="synO68IuK5jwIvQtV5x7P8">激活内核</button>
+        <button class="btn sm" data-page-node-id="g8PEJHc0CNZQ4f513GtbBt">查看内核机器码</button></div>
+      <div class="hint" data-page-node-id="EhenH4OGA9Aw0ufS8JBeIs">不激活也能用免费版 wxauto4，主链路（收消息/发消息/监听）不受影响。</div>
+    </div>
+    <div class="card" data-page-node-id="LGKQ2AbK8IXQa0OBsR5Edv">
+      <h3 data-page-node-id="yKF8zbHUt7pfhcQq3o0iy2">监听范围</h3>
+      <div class="row" data-page-node-id="RSjQdnG4CIKiCKB0hvPXCM"><div class="lb" data-page-node-id="gOeUVGL8MEniuG8n48OWWF">私聊</div><div class="sw on" data-page-node-id="Us4YfHW3porGWyhaSDAx4I"></div>
+        <span style="font-size:12px;color:var(--tx2)" data-page-node-id="M6JN5li5EtaqrkFtO1sEmv">白名单为空 = 所有人</span></div>
+      <div class="row" data-page-node-id="sin9Pre7ftptDZP6Xcn6Wp"><div class="lb" data-page-node-id="IRwbgGVB0tgHiaaDZhQyWb">群聊</div><div class="sw on" data-page-node-id="K3rAL3Uqh4IEZDTJy6cicy"></div>
+        <span style="font-size:12px;color:var(--tx2)" data-page-node-id="c7lDrnBTpkwoo4yztpUxwl">仅监听下列群</span></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="5RYonMdeufQvH3EKCzWvXq"><div class="lb" data-page-node-id="KoJc3PxlYqEZ7iIOOo24Us">监听群</div>
+        <div style="flex:1" data-page-node-id="T3DrFcKOrVRiQyuUCyQ3zQ">
+          <table data-page-node-id="tlzaQiU09e76ugjGqpcZoj">
+            <tr data-page-node-id="Z1bhpkFfspAIPKOO4swFUp"><th data-page-node-id="oBdG2r0CFeCrEBGJWsIfTz">群名称</th><th style="width:110px" data-page-node-id="VDZOi0xRs1gYup0AE4hu3B">@才回复</th><th style="width:60px" data-page-node-id="0c7tsqTR6FcAekU3C1eBh4"></th></tr>
+            <tr data-page-node-id="l3NTYHqzHC1RksjJ9WPCb4"><td data-page-node-id="hIXAhtsz1gZYrG8PCcxKgf">资源交流一群</td><td data-page-node-id="PqZrePNmQ7MhbSVns1UHKE"><div class="sw on" data-page-node-id="e15fNqOiuBsbLgNcAKQjgd"></div></td><td data-page-node-id="0o8Xh7ETUt0Uxk6Ia0pKaX"><a style="color:var(--err)" data-page-node-id="ghzFKcwA8qMGkEVXvNloVO">删除</a></td></tr>
+            <tr data-page-node-id="12DrUN7soTkiztPePdh1PI"><td data-page-node-id="2zACqR2Sq39aa1BmB6rJqB">影视分享总群</td><td data-page-node-id="uxWKAkdCC2gfm8If94uQpJ"><div class="sw" data-page-node-id="LaBLgTBQ2sCVEFeZHxSBVR"></div></td><td data-page-node-id="cAL2ZCxfhoUoJG4wmX63AL"><a style="color:var(--err)" data-page-node-id="oZZvLSg4FiSwXB5DthGxxr">删除</a></td></tr>
+          </table>
+          <div class="row" style="margin-top:8px" data-page-node-id="FYOq1ga25vzlGWuBC9hqmn"><input class="in" placeholder="群名称" data-page-node-id="5BsnK2PYwmGhSziqBNqW6E"><button class="btn sm" data-page-node-id="K9bYWuiGrAwi8UNFU5VHtE">添加</button>
+            <button class="btn sm" data-page-node-id="8yr4LmWeqGaFhIN3HmgEjf">从最近群聊导入</button></div>
+        </div></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="s369hfBXyXq2QR3E3pmLxd"><div class="lb" data-page-node-id="kbzBlz0cMT3ep5cGyxLvD3">私聊白名单</div>
+        <div style="flex:1" data-page-node-id="dDkYh1KpCvHMyva45E7t7o"><input class="in" placeholder="昵称，回车添加" data-page-node-id="xnGLN4lmK1v4hjy23LcuLs">
+          <div style="margin-top:6px" data-page-node-id="dJzxnAnT7WW4nYM6xN7Hb1"><span class="chip" data-page-node-id="kVGRrRsJvzkPbd6vvh0x1A">张三 ✕</span><span class="chip" data-page-node-id="hsiE93RPScbaCc4GIwED0J">李四 ✕</span></div></div></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="ZD1FAAIe3kuv4z4WTA0P2i"><div class="lb" data-page-node-id="bgS00aBd80SrOLJGjKoZhB">黑名单</div>
+        <div style="flex:1" data-page-node-id="FbDiuIzxAeb8kqMa6Bymr9"><input class="in" placeholder="永不回复的昵称" data-page-node-id="us6e6tpQSStkielTXbewS6"></div></div>
+    </div>
+    <div class="card" data-page-node-id="XV6ccRCeaF5mwM07CQ4ZQy">
+      <h3 data-page-node-id="pwvtRlkkVdSIoFKp2WgxeK">触发与风控</h3>
+      <div class="row" data-page-node-id="5KnrbHV47NxGKnB4bT6tqd"><div class="lb" data-page-node-id="7SFXn8jKbpWCJ6zFBQN69Y">触发词</div>
+        <input class="in" value="搜索,搜,查询,找,find" data-page-node-id="ntdHDUcVX4glp09qrCkCIr"></div>
+      <div class="row" data-page-node-id="WNiPk8uJidgPu4YNUFr5XF"><div class="lb" data-page-node-id="vvNZE1riXRd7AXgyAvarew">随机延迟</div>
+        <input class="in" value="1.2" style="max-width:70px" data-page-node-id="nObMaLQVuh2SY2HfBvkIBy"><span data-page-node-id="HcSggO1JfhuUSDhU24kwTJ">–</span>
+        <input class="in" value="4.0" style="max-width:70px" data-page-node-id="W94g4KCKFd3iPlMcDF762g"><span data-page-node-id="yf2tmghgzS65zkxyaARI5r">秒</span>
+        <span class="hint" style="margin:0" data-page-node-id="IyArj6VBLH8mL9DrKTJkKJ">模拟人工，防风控</span></div>
+      <div class="row" data-page-node-id="19vLyKABBfLwp0XJoXIVKg"><div class="lb" data-page-node-id="scYxb0MPwHs00LccdtVWDL">频率上限</div>
+        <span data-page-node-id="mBYTnxcUiqoOiBg1ngePJc">每分</span><input class="in" value="10" style="max-width:60px" data-page-node-id="mQlGHSxpQsiKFrrJYuM0Dx">
+        <span data-page-node-id="unXd2woyN6ViNeC1NHiwHd">每小时</span><input class="in" value="120" style="max-width:60px" data-page-node-id="GpFzRzTxsIXOQ3p0NrbUcW">
+        <span data-page-node-id="sgBJsFHaD0bduN4nAhRv1M">每天</span><input class="in" value="800" style="max-width:60px" data-page-node-id="pGdbVFVytmnyo8OcNi6XIF"></div>
+      <div class="row" data-page-node-id="FXUURx5GNxB83DfBAdOfC4"><div class="lb" data-page-node-id="GbgCEOI9utw1iRw7mDstMb">超限时</div><div class="sw on" data-page-node-id="D5g4gB1LObf6Z3IQ3mFtiA"></div>
+        <span style="font-size:12px;color:var(--tx2)" data-page-node-id="LpSpJZkGpxHCSlyKJ2uK8C">回复限流话术，而不是静默失败</span></div>
+    </div>
+  </div>
+
+  <!-- 4 网盘账号 -->
+  <div class="page" id="p4" data-page-node-id="kDLHMb23qfisFjFNOLGjlx">
+    <h2 data-page-node-id="fHZFOGiA2IUJyg9s7CsJNH">网盘账号</h2>
+    <div class="sub" data-page-node-id="6CCRSYKas4h9FTEs060hHw">Cookie / refresh_token 本地加密保存，日限额自动轮换</div>
+    <div class="card" data-page-node-id="gDyAguHWpmFsC0EB4Y3gZD">
+      <h3 data-page-node-id="FvHN5q4F7sVfuAkqgEqzgF">账号列表</h3>
+      <table data-page-node-id="NBVtSFDhtJVFoQdZ23u8Lu">
+        <tr data-page-node-id="mnAwL61C5IhvQ381uVzkZF"><th style="width:52px" data-page-node-id="ggkDIlRm7eiTyVG3kxiDeZ">启用</th><th style="width:88px" data-page-node-id="64AqiPaGHlfRQpvBurxrnR">网盘</th><th data-page-node-id="f8BFTEV0hiRfCJACvXbCPp">备注</th>
+            <th style="width:150px" data-page-node-id="OYV30hfOm0nyI3n7zeeurC">转存文件夹</th><th style="width:70px" data-page-node-id="3OojtbJbhAjDp9m6HYocte">日限额</th>
+            <th style="width:60px" data-page-node-id="dkDUQZx8KTBJdgE77oMCbL">今日</th><th style="width:70px" data-page-node-id="zUGuaIqNbpBNmBksQUmt1Z">状态</th><th style="width:110px" data-page-node-id="Fv9iqjUTY75J0e2qqlOEnu">操作</th></tr>
+        <tr data-page-node-id="TpSgsDCFeV8HDDSrwANDGA"><td data-page-node-id="DmqyrKS8l9s4ArYTYCTQaG"><div class="sw on" data-page-node-id="L83B1lz1W1R6ukQMqlRaOA"></div></td><td data-page-node-id="u9bkoKh3vlfXjMeQOiFGa5">夸克</td><td data-page-node-id="H9ZojK4xT70ERmFdc0sAzA">夸克主力号</td>
+            <td data-page-node-id="5u4jtfxv69csSO3udOSeb9">/机器人资源</td><td data-page-node-id="jZ4Szx035QRdEYaBTSWgsP">200</td><td data-page-node-id="HPcwmYuneJDbVY7CQJbE6P">37</td><td data-page-node-id="akUwceowlkDKORE7ckUC6v"><span class="tag ok" data-page-node-id="QuAjGoqeSiGOCngD8F30f7">正常</span></td>
+            <td data-page-node-id="xYnQs5zgqW4JA1jbWopqvS"><a data-page-node-id="rq5xpSTEdIYdRryHOLjBqd">检测</a> <a data-page-node-id="tHKyfpWG9kKnZeQLFg7w6l">编辑</a> <a style="color:var(--err)" data-page-node-id="8AmHJE1mRGvMMZGrpP8wuS">删</a></td></tr>
+        <tr data-page-node-id="9HdpGGYOiyEDTou5qgcsRf"><td data-page-node-id="F7ROAAWwouD32ZjqkpVHbZ"><div class="sw on" data-page-node-id="j2bWvZemHqRttPVMcETidZ"></div></td><td data-page-node-id="DjZIwiC2yRb2sbMMEdC1Ef">百度</td><td data-page-node-id="hYBQ6TsCF1cCbDUWixAc7X">度盘A</td>
+            <td data-page-node-id="wF0bAMlFw6jNfUGbUSFamK">/转存</td><td data-page-node-id="sznOqI3ldTbTdlEOFi76T0">150</td><td data-page-node-id="Ce5tELg1HPxQVQ3RkddUjG">12</td><td data-page-node-id="QoAnFF5h2vqlckgoazRVQT"><span class="tag ok" data-page-node-id="kMZagLkbGUAje45JnekSCc">正常</span></td>
+            <td data-page-node-id="L8LYMCVDCAaigefzzeibgL"><a data-page-node-id="G4YfrGvfR3nCDCJs0btFie">检测</a> <a data-page-node-id="yW6VGl8XDiNZan0clPiGUW">编辑</a> <a style="color:var(--err)" data-page-node-id="gTLmLwNg2WoGirjPg6oPAk">删</a></td></tr>
+        <tr data-page-node-id="WA3EJY2n5WdhD3DthJ10OD"><td data-page-node-id="GeezunrV9EeFbNNSgJdwXW"><div class="sw on" data-page-node-id="R8mYHnd9qhedHPsJKj48Rs"></div></td><td data-page-node-id="HeOacjRfXFbaOJTU7E66VZ">UC</td><td data-page-node-id="nMLuVsHGt9lPhMmblsHugA">UC-01</td>
+            <td data-page-node-id="NTonWoi4yEosmg4CW2Zrdi">/bot</td><td data-page-node-id="7oC0XukE01k9bP7JpwhmRu">200</td><td data-page-node-id="89bdNJ7dFB1JAJRYQHWoUt">0</td><td data-page-node-id="2ZiCDe4idu7hkaZ9zSp7fQ"><span class="tag warn" data-page-node-id="l09THGOMCa7ehuFaZatCoY">未检测</span></td>
+            <td data-page-node-id="UintaahdPDbEaa8bPyFjrn"><a data-page-node-id="0QNYHzk32daCz8btH5Xh0S">检测</a> <a data-page-node-id="zpl0qIXWjPO4q9X2oqRQwV">编辑</a> <a style="color:var(--err)" data-page-node-id="tzrnMhy9xSLcLPL2hBM8oi">删</a></td></tr>
+        <tr data-page-node-id="C2TvrGxdZg9vnx5wBcIhTu"><td data-page-node-id="bBtfR7sQLKI5bJJkxpTWvN"><div class="sw on" data-page-node-id="dDzL4g8B0IpcXWcV0nFOyx"></div></td><td data-page-node-id="f5Yac55FzDeRWLJD8z2gDz">阿里</td><td data-page-node-id="0Arm0OnDPoafUmfGscLrxl">阿里云盘</td>
+            <td data-page-node-id="3o2Vt7w1JW82fJeOUM0LeA">/资源</td><td data-page-node-id="Cgy0pfi7g7BjFXtQJq7SxG">100</td><td data-page-node-id="2yfFKIryDZfHFKMIO031Yf">100</td><td data-page-node-id="bBeKX23wJjbLhkTeXhjKM3"><span class="tag err" data-page-node-id="auv2Xz3tx4bzx90rNnJJvZ">已超限</span></td>
+            <td data-page-node-id="6sYiNuzRii8FsI52GZaCLA"><a data-page-node-id="SIck5xGstJcgmbHpvnAkak">检测</a> <a data-page-node-id="vgceN9y3tEHT1mHsrhFH8F">编辑</a> <a style="color:var(--err)" data-page-node-id="wAxMmK3Vo9jzqZh7tkGylt">删</a></td></tr>
+        <tr data-page-node-id="oyrG9Ho2qNHUkXjbwfRZhJ"><td data-page-node-id="1lP6nsNAc1Bg78qDjnKz2p"><div class="sw" data-page-node-id="eJIhsFaYu0e83Wxa8s1cS3"></div></td><td data-page-node-id="DOsbiFVuExroMq6waw3HCT">迅雷</td><td data-page-node-id="FTwySPh9GDmPvsstKQDr5D">迅雷号</td>
+            <td data-page-node-id="mBX2Riu3CRhQWX96ckTrlQ">—</td><td data-page-node-id="1MxAkpaZZsrhzwlmpZtAp2">200</td><td data-page-node-id="CG8Ef8EUcsRfQXD7ImyrwN">0</td><td data-page-node-id="9wqFxKGPoHv1B6Pk9GwQUC"><span class="tag n" data-page-node-id="D0aXajOErSkcJ0pyIB3kbx">已禁用</span></td>
+            <td data-page-node-id="L4kydK2u7Vp85cMnXw4LL2"><a data-page-node-id="hc1RiMzsldF4PYochgWBUZ">检测</a> <a data-page-node-id="ZLD07FBWEf0If1CTAGeaO7">编辑</a> <a style="color:var(--err)" data-page-node-id="Rdm7EYOF18v57FUtFlHoxv">删</a></td></tr>
+        <tr data-page-node-id="62yRAwiEAaCjyC94wFvek1"><td data-page-node-id="XxB7BXSY1tUKzNF0C6fNQi"><div class="sw on" data-page-node-id="wI7spHeE6VkefSgGGRcAoc"></div></td><td data-page-node-id="DuMiWHfNkJwsQfhMwmxuov">光鸭</td><td data-page-node-id="0mm8jTlqCPUEjGpfr3Oovp">光鸭号</td>
+            <td data-page-node-id="0AaZTni7q2UJCUpPxnU4Vm">/bot</td><td data-page-node-id="iKDXSHNtXIc2Cy4GYnj5eG">200</td><td data-page-node-id="uLFTTsYITJWmrD71JFw9mZ">3</td><td data-page-node-id="Qg6F7tsivudFEqkAJaUvVA"><span class="tag ok" data-page-node-id="qeO8gHJvE3aJfMPKNxlEWE">正常</span></td>
+            <td data-page-node-id="sfQ7JAivt4mSfOp6Fj6kck"><a data-page-node-id="a2YTJTPFrDegGcOjhiIINZ">检测</a> <a data-page-node-id="9lAYmUv1t5kT4hxfRt9WN8">编辑</a> <a style="color:var(--err)" data-page-node-id="HDij76YZ45g8JeIW59GoTs">删</a></td></tr>
+      </table>
+      <div class="row" style="margin-top:12px" data-page-node-id="k9AMw0XCzM3xAory1Kj3E6"><button class="btn pri" data-page-node-id="EGtnhEtU6MxcdAAwYKHtu5">+ 新增账号</button>
+        <button class="btn" data-page-node-id="gDeeytj6F8cIAjGeBWlzAI">全部检测</button>
+        <span class="hint" style="margin:0" data-page-node-id="DsVYmCa6QXDltW6eEpjQmH">移动云盘适配器待实机验证，当前会回落原链</span></div>
+    </div>
+    <div class="card" data-page-node-id="lRFDSJT6LxSAr8bptbPf6i">
+      <h3 data-page-node-id="3IpaHZoCNetA8VRPedBYTc">新增 / 编辑账号</h3>
+      <div class="row" data-page-node-id="5Jyek7DDuqGM0swdBReFpE"><div class="lb" data-page-node-id="ucBf6EcQ9LnfLWYytSCq66">网盘类型</div>
+        <span class="chip on" data-page-node-id="CVuC7aSgWFLnFt1x7sWAVV">夸克</span><span class="chip" data-page-node-id="pnWATd2aZ8EjzaiSIH7AiA">百度</span><span class="chip" data-page-node-id="9N3twIxWNBynGgxrhaW0P9">UC</span>
+        <span class="chip" data-page-node-id="5Xm3LCEc7oUfMZRE5xA0Md">阿里</span><span class="chip" data-page-node-id="ZcxFAtIuiK47S4UchqEHsz">迅雷</span><span class="chip" data-page-node-id="heCTFEfpk0nGhpQYk5aXIO">光鸭</span>
+        <span class="chip" data-page-node-id="BZDE5Rv0AtiEqHNf22Ah4Q">移动</span></div>
+      <div class="row" data-page-node-id="W1JD1FsW5cDE1uoMu0cVg4"><div class="lb" data-page-node-id="caHApFTcpRQZpToHwEE600">备注名</div><input class="in" placeholder="夸克主力号" style="max-width:260px" data-page-node-id="pnGUnUssenhgtpJiNEdJnO"></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="3YXq97jjU4kj5sA82QGa77"><div class="lb" data-page-node-id="q9EDRdoWjOGE9FtF50uLNW">Cookie</div>
+        <div style="flex:1" data-page-node-id="sSyS9huPlGKltRO9TkfrfB"><textarea class="in" rows="3" placeholder="夸克/UC/百度填 Cookie；迅雷/阿里填 refresh_token"></textarea>
+          <div class="hint" data-page-node-id="MwmsFyTJVMoaDqkmfZDGeh">落地加密保存，日志中不输出</div></div></div>
+      <div class="row" data-page-node-id="fXRRVqoiC6YEX2DNUJK47i"><div class="lb" data-page-node-id="yoGjS12gjW86rH3G9yeGzJ">转存文件夹</div>
+        <input class="in" placeholder="留空=根目录" style="max-width:220px" data-page-node-id="sN0xdxeF2nRprZRwEU9WDu">
+        <button class="btn sm" data-page-node-id="2BybIvAjH4ZUbBmWLETzJv">选择…</button>
+        <span class="hint" style="margin:0" data-page-node-id="DjYkABuOEHQkS5oOPpX77V">从账号目录树里选</span></div>
+      <div class="row" data-page-node-id="Nr97X9sl7VzHlgnQ3KbbvN"><div class="lb" data-page-node-id="8hTiuf8VvDCs6j53kHpSoY">每日限额</div>
+        <input class="in" value="200" style="max-width:80px" data-page-node-id="NCvImrfHU4bL5Eb30iFBR3"><span data-page-node-id="iWwQqkKUVGEXmN9xUUEPIj">次</span>
+        <span class="hint" style="margin:0" data-page-node-id="HofrjhBP6qbblW5J6RgMLX">超限自动切换到同类型下一个账号</span></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="5eUU9P5mG2KtiGRQnHUR6N"><div class="lb" data-page-node-id="Wf1iOq0LPigTiInck0vYbS">广告词过滤</div>
+        <div style="flex:1" data-page-node-id="zxhMXYPjovsATKptk1SbNG"><input class="in" placeholder="命中即删除转存后的文件，逗号分隔" data-page-node-id="VSgNeE41Qn3CbNSjWBsM9n">
+          <div class="hint" data-page-node-id="YyZEF4nkjt9AhFehmskcnK">转存后扫描文件名，含这些词直接删掉</div></div></div>
+      <div class="row" data-page-node-id="EFQLO4Zz9rvVkDtWuOLNwF"><div class="lb" data-page-node-id="8ihjABErvimBBDLFt3mD8D"></div>
+        <button class="btn pri" data-page-node-id="CCAOPpfWw2GHJ2bOj07lCY">保存并检测</button><button class="btn" data-page-node-id="01Rf0kwCpCepGwTbcvGIsd">取消</button></div>
+    </div>
+    <div class="card" data-page-node-id="NdqONfocVnSi49kPAUDIIp">
+      <h3 data-page-node-id="vBniRtsDwjuZQWuqN3WCYG">转存策略</h3>
+      <div class="row" data-page-node-id="Js7IhhotrQESz9SbIEsQlm"><div class="lb" data-page-node-id="lOPqaqPVvZsX8hjPMTsG0V">失败回落</div><div class="sw on" data-page-node-id="qAVdvzw2PIioNQEBrdhm1k"></div>
+        <span style="font-size:12px;color:var(--tx2)" data-page-node-id="70rkHEtynQCsAQM6ZJoo9k">转存失败时发原始链接，不让用户空手而归</span></div>
+      <div class="row" data-page-node-id="LIAPDsPHpmTdLQ3APEYops"><div class="lb" data-page-node-id="5r6tPl6GpsNMtAHQQmCnGJ">分享有效期</div>
+        <input class="in" value="0" style="max-width:70px" data-page-node-id="td2qy0cPU0icNKHlnTGxCd"><span data-page-node-id="1Lh9A2ffHUeCfdX52XDI1o">天（0=永久）</span></div>
+      <div class="row" data-page-node-id="ZWByWxw4JeXQwvlPLILdIQ"><div class="lb" data-page-node-id="exvPSd40iNFeNo4PHiA6TK">失败重试</div>
+        <input class="in" value="2" style="max-width:70px" data-page-node-id="zjuR2vmQF837NeeakS2vgu"><span data-page-node-id="HFpzcPDM6Cmop6FRsBPUCK">次</span></div>
+    </div>
+  </div>
+
+  <!-- 5 盘搜接口 -->
+  <div class="page" id="p5" data-page-node-id="0sbG8f9jarzXtas5tnA062">
+    <h2 data-page-node-id="gLCLpfpxBE5dYPE8OvOuNU">盘搜接口</h2>
+    <div class="sub" data-page-node-id="oQ3ZYulH8BUOfz7hOcqDvM">搜索数据源，全部走盘搜 /api/search，网盘类型与接口对齐</div>
+    <div class="card" data-page-node-id="2tGrOiv53DWWGkB8sIJQGw">
+      <h3 data-page-node-id="I0ET3S73kQ424LWsSwQo4P">接口配置</h3>
+      <div class="row" data-page-node-id="gmrtAAsOZ2kA01qq2QCCSZ"><div class="lb" data-page-node-id="pAra4pUe5nI1hJcx43vLgo">接口地址</div>
+        <input class="in" value="http://38.92.9.77:8888" data-page-node-id="irlD6JNZCvmdZ5lPFBF8E8">
+        <button class="btn sm" data-page-node-id="F1d22L3XZffuEZ1pa8UnoY">测试连通</button></div>
+      <div class="row" data-page-node-id="H1kvGHHd0yODnjWSr51XFC"><div class="lb" data-page-node-id="TXH5bNmI70lEIqGpAZTlLu">Token</div>
+        <input class="in" placeholder="自建接口若需鉴权才填" style="max-width:280px" data-page-node-id="sQtQ2MhLW4BL21XtlvjqMv"></div>
+      <div class="row" data-page-node-id="DmJiTrYKl4su0YVlUbI5H9"><div class="lb" data-page-node-id="giMVfBvXF7GsxJioJvTnmV">超时</div>
+        <input class="in" value="20" style="max-width:70px" data-page-node-id="u7Okjw0UK3bvUyveWgAHlX"><span data-page-node-id="9nIUIOZ4LtGUle3ek9IvOo">秒</span>
+        <span class="hint" style="margin:0" data-page-node-id="vgvrOo5oirH8zfxCrmT5Oo">重试</span>
+        <input class="in" value="2" style="max-width:60px" data-page-node-id="edhR8AZrOtd4pfVqeM3aPt"><span data-page-node-id="14oOFCJbQgXmea55aejHHx">次</span></div>
+      <div class="row" data-page-node-id="GyKcX0dpCK8I4NzADCONcK"><div class="lb" data-page-node-id="7P0RwrLgHHYCX84kOHv0to">每页条数</div>
+        <input class="in" value="8" style="max-width:70px" data-page-node-id="yo53V0JgqZmVTVy7WBSClR">
+        <span class="hint" style="margin:0" data-page-node-id="oYSeQ2ASHU2mczOdsSH3f5">单次最多取</span>
+        <input class="in" value="60" style="max-width:70px" data-page-node-id="joZ62sXFOwjvrWFwTMFNKN"><span data-page-node-id="R9Dm9mbK9XQ8xmuLmwPnjg">条</span></div>
+      <div class="row" data-page-node-id="xHfxDWHui7wYZkf4ZxB6Mv"><div class="lb" data-page-node-id="bG0QjKhcDT1ZddfeeGLuUj">上下文超时</div>
+        <input class="in" value="300" style="max-width:70px" data-page-node-id="Q5GRH9qEsUFlnq9u4Of2Aj"><span data-page-node-id="VSh7V3wlyTT1Bs6GPpZWn3">秒（选号有效期）</span></div>
+    </div>
+    <div class="card" data-page-node-id="eHndN5FprXZ3a9UVWP706i">
+      <h3 data-page-node-id="6bbb93Dw20cFUZ60XeVSqD">启用搜索的网盘类型</h3>
+      <div style="margin-bottom:8px" data-page-node-id="J51pK7SD9txAnPCrIwGgXS">
+        <span class="chip on" data-page-node-id="2jCdPF3gI8NwWEDxjTJdoV">夸克 quark</span><span class="chip on" data-page-node-id="C5syCITw6tH5DxWcu9hQMV">百度 baidu</span>
+        <span class="chip on" data-page-node-id="ogNlxACjwNnHC5i8cKwiNH">UC uc</span><span class="chip on" data-page-node-id="uJBXpZLqRhZS4gThD3G7tE">阿里 aliyun</span>
+        <span class="chip on" data-page-node-id="dEZFjpFRAmSNV6gPK3Zzq6">迅雷 xunlei</span><span class="chip on" data-page-node-id="9w9b6zGVXkbRHTjCp5xegn">光鸭 guangya</span>
+        <span class="chip on" data-page-node-id="os0TCbIj0Utgf81TswwDED">移动 mobile</span>
+      </div>
+      <div style="margin-bottom:10px;font-size:12px;color:var(--tx3)" data-page-node-id="HMMJpQqSaHJBuv85wU1Lzd">可选（盘搜也支持）：</div>
+      <div data-page-node-id="N6yWbKr5xqOzzQEHiIxCac"><span class="chip" data-page-node-id="KaaB86GCeiunthrvrDRJN7">天翼 tianyi</span><span class="chip" data-page-node-id="O2TXFMVlnz27pmJswihHAs">115</span>
+        <span class="chip" data-page-node-id="BHosYr5ec9AnSESN4MYfsy">123</span><span class="chip" data-page-node-id="UOKJ50cgM0BArl3lRILyMD">PikPak</span><span class="chip" data-page-node-id="YylcnVMBGbGniULvSSu3FC">磁力 magnet</span></div>
+      <div class="hint" style="margin-top:10px" data-page-node-id="sAqI2hnAq4vqKe4qK1cUaI">灰色类型不会出现在搜索结果中，也不会被转存。</div>
+    </div>
+    <div class="card" data-page-node-id="Sl1Z2mVxLDoB0vnWCeZJiJ">
+      <h3 data-page-node-id="vNKHEotCQGwgjoCbZnagno">接口自测</h3>
+      <div class="row" data-page-node-id="Lt20LaTVuAa41PjijfFdz9"><div class="lb" data-page-node-id="P7TTA4xAlUHVOW3tMxW4KJ">关键词</div>
+        <input class="in" value="三体" style="max-width:200px" data-page-node-id="wq48XsNzpr9tcYUgBnTzx8">
+        <button class="btn pri" data-page-node-id="AbEjy7h59mYOfVQt3OZGVa">搜索测试</button></div>
+      <table style="margin-top:10px" data-page-node-id="2fa30w5H6ZUKMh8DLWW3bI">
+        <tr data-page-node-id="9OnrwPOgFZveVLaXv2HS9l"><th data-page-node-id="1BF0iH9JI3Te5FWSbkbsQX">类型</th><th data-page-node-id="YXwaU6kmVKrj8pjbhoHHWv">标题</th><th style="width:130px" data-page-node-id="krMDe1KnG1QJKBibxPUtLR">来源</th></tr>
+        <tr data-page-node-id="gD4RqGSuKvqjE0uOv9h5YL"><td data-page-node-id="3lh7uiIunUTYB2AxtXk2lo">夸克</td><td data-page-node-id="I4LBql1qNsJlR52xNbuJND">我的三体 全集</td><td data-page-node-id="hr7VAzjvZTv87PtLcb1aBv">tg:wpan8</td></tr>
+        <tr data-page-node-id="CtDpyfITWuPkUS28hoDEh0"><td data-page-node-id="7QBNpcX2ZZK4b3XMmYVGra">百度</td><td data-page-node-id="vsABGzpDTV9V99cbQFIm2I">三体 第一季 1080p</td><td data-page-node-id="gPHBUsvKml7HoSoss7bbBf">plugin:duoduo</td></tr>
+        <tr data-page-node-id="WFwkG6LoNppFlNxLObkVXh"><td data-page-node-id="fpiVRmI3gBtLmBvT2Bz19g">移动</td><td data-page-node-id="vXq8N3azy1EP9ygTV8Nlah">三体 全集 高清</td><td data-page-node-id="rBppRqngzk8apBfrolYpCD">plugin:wanou</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 6 转链群发 -->
+  <div class="page" id="p6" data-page-node-id="2cNYcsBNfe1DNEUWRLSgUd">
+    <h2 data-page-node-id="9HZtlGW2ydmhbiw5IF8Ta8">分享文案转链</h2>
+    <div class="sub" data-page-node-id="bOKNOAOdDAOME8bVu7oodw">把别人的资源文案里的链接换成自己的，再群发</div>
+    <div class="note" data-page-node-id="xC4WwOfI5AQ7XaQh6a4A22">这是风控最敏感的功能。默认延迟比搜索更保守，建议先小范围试。</div>
+    <div class="card" data-page-node-id="0m1M5PvF87hXmriSESNsQk">
+      <h3 data-page-node-id="yIKuz1La3zatMKKMEeelYi">转链</h3>
+      <div class="row" style="align-items:flex-start" data-page-node-id="UK5k6uYz4e5ZhIdP6JDRHm"><div class="lb" data-page-node-id="FHfvoHwtdTwC6i3NNrX6Zx">原文案</div>
+        <textarea class="in" rows="7" placeholder="粘贴别人发来的分享文案，支持多条链接混排">【资源分享】三体 全集 4K
+链接：https://pan.quark.cn/s/251cd20497e6
+提取码：abcd
+
+备用（百度）：https://pan.baidu.com/s/1abc  提取码 1234</textarea></div>
+      <div class="row" data-page-node-id="4mc8gH8Ium5utNY0GCNcme"><div class="lb" data-page-node-id="rhvG91tzfAeymHlbA7H5eD"></div>
+        <button class="btn pri" data-page-node-id="bQHUuNpMcqrKMlfbYmUKSI">开始转链</button>
+        <button class="btn" data-page-node-id="UamWYwmjGRreOG4lXdAYjA">识别结果预览</button></div>
+    </div>
+    <div class="card" data-page-node-id="P0Ct877eZreCe5CKu9lYog">
+      <h3 data-page-node-id="sfCtReasLshEPr1X0FJfAC">识别到的链接</h3>
+      <table data-page-node-id="FPsqO0voT2GAdciRE6kzcW">
+        <tr data-page-node-id="7tDd6nKGslvpnrxrt1YyAK"><th style="width:70px" data-page-node-id="H8FTPFnJiav48KiO7EThG3">类型</th><th style="width:220px" data-page-node-id="y1vE7ERCjJPaisCj3kT0Tp">原链接</th>
+            <th style="width:70px" data-page-node-id="E28qTUZtgtWLeMQxvF57sq">提取码</th><th style="width:80px" data-page-node-id="hCE6SBHfbP0aVvtxY5nzuS">状态</th><th data-page-node-id="T7mBKFFcfplyzyXmbevRRL">转存后</th></tr>
+        <tr data-page-node-id="mlpF0hYXPOTKsFlcHzRpNH"><td data-page-node-id="ZCf0ZvVgS2Pp3LdoBbKTnW">夸克</td><td data-page-node-id="Po7OMonQ9wugs7VABdbUoZ">pan.quark.cn/s/251cd2…</td><td data-page-node-id="3KImYC39pkX3F8kG5WX4On">abcd</td>
+            <td data-page-node-id="QYUgC0z9brvxmMZEj0MXRg"><span class="tag ok" data-page-node-id="8dXyFWdhinfqPBqiU2xUjw">已转存</span></td><td data-page-node-id="QmAv0Wcv3jkHm5P96goXtT">pan.quark.cn/s/9f8e7d6c</td></tr>
+        <tr data-page-node-id="zHVMkQvyac1tX6H6eGoOBF"><td data-page-node-id="kdZVrzNMF0oVk9Yb6gdJCW">百度</td><td data-page-node-id="6pmKHRizPpex2naTaGQDNi">pan.baidu.com/s/1abc</td><td data-page-node-id="XT2nLPY8rz5i2CJTVUivOm">1234</td>
+            <td data-page-node-id="rr2JyD7QIxvXOA31LwYn6P"><span class="tag err" data-page-node-id="FFNHC8zn8LjHotzBcWpQ30">失败</span></td><td data-page-node-id="V6rioWuSXOJla5Tj5Rv71N">账号日限额已满</td></tr>
+      </table>
+      <div class="hint" style="margin-top:8px" data-page-node-id="GE7qNyeTe6U0JToPOsVyFJ">部分失败也能继续：成功的换新链，失败的保留原链。</div>
+    </div>
+    <div class="card" data-page-node-id="o6G1kM8XjwvWGPU8EyPOEx">
+      <h3 data-page-node-id="d9wiekdc8h3PtuhtVKL7qk">转链后文案</h3>
+      <div class="row" style="align-items:flex-start" data-page-node-id="aPo0mMfMwrfDbZ3qxVl0QI"><div class="lb" data-page-node-id="FhTilwkRxZU4dfFwQdDbTn">输出模板</div>
+        <textarea class="in" rows="5">【资源分享】{title}
+{link_block}
+—— 由 {bot_name} 整理 · {time}</textarea></div>
+      <div class="row" data-page-node-id="R5V5JA9JAG5GthSUShf06a"><div class="lb" data-page-node-id="MLOQr7S1YwA38HD7ed7MqX">失败链接处理</div>
+        <span class="chip on" data-page-node-id="FWXOIdjjLZN2TdUox6pe2m">保留原链</span><span class="chip" data-page-node-id="s51KkdynW8CNiFqoicfa6c">直接删掉</span>
+        <span class="chip" data-page-node-id="FS4hMkcnjaoI6IyhAd848z">替换为提示文字</span></div>
+    </div>
+    <div class="card" data-page-node-id="WoAGQADbv7i3FpSK7rKQHZ">
+      <h3 data-page-node-id="4Tf1dBzIpeU0yXa9m9HyPf">群发</h3>
+      <div class="row" style="align-items:flex-start" data-page-node-id="nVUyIZKQiX1tPPWm40Aqcc"><div class="lb" data-page-node-id="ZtLBU3v6IGaxUI03v0R8VD">发送目标</div>
+        <div style="flex:1" data-page-node-id="ydRQp2qdLxI60n8VEiHVFI">
+          <div data-page-node-id="kL7hVSWxo85M9PmZUKAIco"><span class="chip" data-page-node-id="3mrpd1ZD7gjDMyAnSL0nb2">资源交流一群 ✕</span><span class="chip" data-page-node-id="HxDFHboSmrgN6XCeEiu6fJ">影视分享总群 ✕</span>
+               <span class="chip" data-page-node-id="kGyNqisAJ8ozSEN9egAXPo">张三 ✕</span></div>
+          <div class="row" style="margin-top:8px" data-page-node-id="8Y1xoAxF0LAIB7HToAAxkl"><input class="in" placeholder="群/好友昵称" data-page-node-id="er2cmvr52YTIynq2LxavF1"><button class="btn sm" data-page-node-id="jkvWgH0hAL3m5ALJ98LtQz">添加</button></div>
+        </div></div>
+      <div class="row" data-page-node-id="TgEldxKxrH2MhntHRYIqEM"><div class="lb" data-page-node-id="w0riC51aCbXx1v4SRU8VT4">目标间隔</div>
+        <input class="in" value="5" style="max-width:70px" data-page-node-id="hf0cmGsMqTzvK95krTXkLN"><span data-page-node-id="Jtm8bStUEqj3D52JACmFLl">–</span>
+        <input class="in" value="15" style="max-width:70px" data-page-node-id="Kf5A49PFIUO2TpKVUbmH2z"><span data-page-node-id="dDQFlkl1Ez2iDHERCxrI0z">秒（每个目标之间随机）</span></div>
+      <div class="row" data-page-node-id="vTBbDIcNBZoPkSfmtwPTLZ"><div class="lb" data-page-node-id="tOxkmAMWTP9A2ZFozdw7lt">单批上限</div>
+        <input class="in" value="20" style="max-width:70px" data-page-node-id="8dx4IPzGiiGwtiNVbEDrlC"><span data-page-node-id="rpynLPlNmWyoyHf4AJhYB5">个目标</span>
+        <span class="hint" style="margin:0" data-page-node-id="FStAXP0tInL1Rk30perbwp">超过就分批，批间休息</span>
+        <input class="in" value="60" style="max-width:70px" data-page-node-id="hjt3z9cM6zFcUzAp7VUklR"><span data-page-node-id="tHaXanj59qq4KkGMoqynKr">秒</span></div>
+      <div class="row" data-page-node-id="7ZmhRhn4NrfMXK74oVOxw7"><div class="lb" data-page-node-id="wou4dG01as5JY6Y11iCCST"></div>
+        <button class="btn pri" data-page-node-id="CuAIC3zNjB4ZT4RE15yKLp">立即群发</button>
+        <button class="btn" data-page-node-id="6f9j6OEuLMG5YTiiZjCKd9">存为草稿</button>
+        <button class="btn" data-page-node-id="E7HPSzNODPXHp4GAlEu7EB">定时发送</button></div>
+    </div>
+  </div>
+
+  <!-- 7 消息模板 -->
+  <div class="page" id="p7" data-page-node-id="UeMkc9NV5y6fazWhkpWkd9">
+    <h2 data-page-node-id="LUaXiMm6LB9Tzc8brhEckb">消息模板</h2>
+    <div class="sub" data-page-node-id="emFJpnBhgc0cmkRvFUtgsy">占位符写错时原样保留 {xxx}，方便你一眼看出哪个错了</div>
+    <div class="card" data-page-node-id="YbM87blI3BUXs04pT2lXou">
+      <h3 data-page-node-id="2JpLlX5WokFcfCS84qIyv8">搜索流程</h3>
+      <div class="row" style="align-items:flex-start" data-page-node-id="23CnPCBVsdF4nZuUg0AnWO"><div class="lb" data-page-node-id="aSHZeF6cR18NUZ4FpdEHMU">搜索中</div>
+        <textarea class="in" rows="2">正在搜索「{keyword}」，稍等…</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="e3Z5tZRF8Umd3PexTXnbpc"><div class="lb" data-page-node-id="ixO60CcsmYNw5c3fiTFM5L">结果头</div>
+        <textarea class="in" rows="2">「{keyword}」找到 {total} 条（第 {page}/{pages} 页）</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="kLIwICkkFiCcfSkHUzLdrk"><div class="lb" data-page-node-id="yzN6gDbq7WJpQX1p9vBxAN">结果条目</div>
+        <textarea class="in" rows="2">{index}. {title}
+   {pan_name} · {source}</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="fsUmHVo0EEQCPKzPafn1OZ"><div class="lb" data-page-node-id="g7IA7C70YLRkJ1D9HGA7C0">结果尾</div>
+        <textarea class="in" rows="2">回复数字获取资源
+回复「下一页」翻页</textarea></div>
+    </div>
+    <div class="card" data-page-node-id="F3jDHphHzUJNsO4aupTeTS">
+      <h3 data-page-node-id="EgQ2f2N6wXN5Y3N2AMGLKS">转存流程</h3>
+      <div class="row" style="align-items:flex-start" data-page-node-id="a1oq7d4knuEtVYAYpdneUd"><div class="lb" data-page-node-id="SSH64zAHh6xFEUivXDCR16">取资源中</div>
+        <textarea class="in" rows="2">正在为你转存「{title}」…</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="HaIVS5p9lZf5JgvH3YnN15"><div class="lb" data-page-node-id="KkNVHmvrGaBFjyfkrxMILo">成功</div>
+        <textarea class="in" rows="3">{title}
+{share_url}
+{password_line}</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="8KAbxDdFES5u0q7UajIKDq"><div class="lb" data-page-node-id="6eHlHVNkkcE7TNPwgSBsG6">提取码行</div>
+        <textarea class="in" rows="1">提取码：{password}</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="serpnj7ygUDDMFdxHemhVM"><div class="lb" data-page-node-id="VglkBPFwVbJcVDHowG4EU6">失败</div>
+        <textarea class="in" rows="2">转存失败（{reason}），这是原始链接：
+{origin_url}</textarea></div>
+    </div>
+    <div class="card" data-page-node-id="6zIURpz6YUGGfGdMpPsHKc">
+      <h3 data-page-node-id="BCwT1xnMKbWqCH3JHRHP5S">兜底话术</h3>
+      <div class="row" style="align-items:flex-start" data-page-node-id="QSQN7WJBB2lVrSatIA3Ojj"><div class="lb" data-page-node-id="qTjkPctxxUU6wBDCLKfvXO">无结果</div>
+        <textarea class="in" rows="1">没有找到「{keyword}」的资源，换个关键词试试。</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="lwhxh1MPtwNAK8GUkAVYUj"><div class="lb" data-page-node-id="8WkK3h8jgCn7ww0hWEGY2c">已过期</div>
+        <textarea class="in" rows="1">上次的搜索结果已过期，请重新搜索。</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="ea3AB5feMhE41DmFzTnAtd"><div class="lb" data-page-node-id="8eRRNOJnuHWd96DFJB2Kep">序号错误</div>
+        <textarea class="in" rows="1">序号超出范围，请回复 1-{max} 之间的数字。</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="lHT9ztlCpsUBWqaX8lFqPv"><div class="lb" data-page-node-id="i6U2xSaayplAb9GnW0LW3L">无可用账号</div>
+        <textarea class="in" rows="1">「{pan_name}」还没有配置可用账号，请联系管理员。</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="Hl9BnQsdk2A2RoNi6dE1Ru"><div class="lb" data-page-node-id="nCmFYb5dhFnQRxz7sDlhtH">限流</div>
+        <textarea class="in" rows="1">请求太频繁了，请 {wait} 秒后再试。</textarea></div>
+      <div class="row" style="align-items:flex-start" data-page-node-id="xf7umIasDxI6HubDFEeCRI"><div class="lb" data-page-node-id="CLzoRcZMlr56SByykw7FGk">帮助</div>
+        <textarea class="in" rows="4">发送「搜索 关键词」找资源
+例：搜索 三体 夸克
+回复数字取资源，回复「下一页」翻页</textarea></div>
+      <div class="row" data-page-node-id="SFvKzgHSuK4MjciDi6rZ7H"><div class="lb" data-page-node-id="S6Dh4CovzZpUxOiFtBbInh"></div>
+        <button class="btn pri" data-page-node-id="71AUcKpNV3LBYkvp1G7FQz">保存</button>
+        <button class="btn" data-page-node-id="ziG1tIHnJvlRNLCppsjEyR">恢复默认</button>
+        <button class="btn" data-page-node-id="IVzD2vAG8LPgTODwhU97E9">插入占位符 ▾</button></div>
+    </div>
+  </div>
+
+  <!-- 8 AI 对话 -->
+  <div class="page" id="p8" data-page-node-id="dzRHxU1P9HzbDQ4JZon0O9">
+    <h2 data-page-node-id="uEmznQ1LbSwGIAfy1GCgeB">AI 对话</h2>
+    <div class="sub" data-page-node-id="PEhivDP3AWm5lSce8LcPcp">可选。没命中搜索指令时才调用，不影响纯搜索主链路</div>
+    <div class="card" data-page-node-id="SkffwsoYAOoe3mSmBuOI2E">
+      <h3 data-page-node-id="7sHsAD49rFXgKr61kbrxFk">总开关</h3>
+      <div class="row" data-page-node-id="045TCyBNGA29En62Gby81V"><div class="lb" data-page-node-id="6raTTb5mZ09zNUqqFBSAei">启用 AI 回复</div><div class="sw on" data-page-node-id="U6fDIp4jBJrMgk4WqMqE5g"></div>
+        <span style="font-size:12px;color:var(--tx2)" data-page-node-id="1t9zMTGHBmpRkfybu8yrKS">关闭后，非指令消息一律不回复</span></div>
+      <div class="row" data-page-node-id="MG11guRC3HmVAIoUn28fm0"><div class="lb" data-page-node-id="ALQqBgtMQyoK7ybYMYvVCf">群内触发</div>
+        <span class="chip on" data-page-node-id="L048XZ723MKOfBNz5gcvsO">被 @ 时</span><span class="chip" data-page-node-id="vncOfzUajkr2LAXBree8hQ">任意消息</span></div>
+    </div>
+    <div class="card" data-page-node-id="p9oQkTLseIeeFE0fd9WxGm">
+      <h3 data-page-node-id="XDZoio2OFvBoDF9jo1k0E4">接口</h3>
+      <div class="row" data-page-node-id="S8fmtLgdJbZ7tQbFvwcqRQ"><div class="lb" data-page-node-id="AOoeBBZVwC8Yng7539LTHn">类型</div>
+        <span class="chip on" data-page-node-id="73mHIoJNAPGwEiMmEJsKx5">OpenAI 兼容</span><span class="chip" data-page-node-id="rts84j3pdQP7MAKsoBcxlD">Dify</span><span class="chip" data-page-node-id="wKEtNPOhPG0LYaaptk0oaP">Coze</span></div>
+      <div class="row" data-page-node-id="LfBit8TjQ2Ka2vJOiQsAeE"><div class="lb" data-page-node-id="zcjvC97xdisrFURqIbkuSY">接口地址</div>
+        <input class="in" placeholder="https://api.deepseek.com/v1" style="max-width:320px" data-page-node-id="GUgTr4AZEIMm07iDeOQDTG"></div>
+      <div class="row" data-page-node-id="QenyN7yZxmOHFwSrdZzYbg"><div class="lb" data-page-node-id="3sEVrNYjpYexEALCrMYz8B">API Key</div>
+        <input class="in" type="password" value="sk-************" style="max-width:320px" data-page-node-id="QsAKD9jevtHWQUrcK155Hr">
+        <button class="btn sm" data-page-node-id="tD9iqJW4r81VFxgiykRtfl">测试</button></div>
+      <div class="row" data-page-node-id="89aTYQZIhKTHmFDx4sYfW7"><div class="lb" data-page-node-id="HlNtygKi0Xko7ugyzuX8Nt">模型</div>
+        <input class="in" value="deepseek-chat" style="max-width:220px" data-page-node-id="eW3Z9uHEzWmyES21NPvE6C"></div>
+    </div>
+    <div class="card" data-page-node-id="SVROAXboN4dk28n56sgcIU">
+      <h3 data-page-node-id="YT3p8weUoD3iVzkE9WRFNF">人设与记忆</h3>
+      <div class="row" style="align-items:flex-start" data-page-node-id="00UshBsHrC1UGhQKome062"><div class="lb" data-page-node-id="3Ag7YUC2hSZkodRdB6CEoA">系统提示词</div>
+        <textarea class="in" rows="5">你是资源助手。用户问资源时引导他用「搜索 关键词」。
+回答简短，不要超过 3 句。</textarea></div>
+      <div class="row" data-page-node-id="mcl6Eo7PYE3pbv5o8HCRsx"><div class="lb" data-page-node-id="HgBjwiXuUCAfKo8VP2ZAa2">对话记忆</div><div class="sw on" data-page-node-id="xOytcEClxuq4ZVC9peKM0k"></div>
+        <span data-page-node-id="AtpuY9hRz4mSWNLXnFJlmx">携带最近</span><input class="in" value="10" style="max-width:60px" data-page-node-id="hqhXRLKU333grueGWnptOh"><span data-page-node-id="lPo3QV6WQjxCMVBoQmy49e">条</span></div>
+      <div class="row" data-page-node-id="Gcy20vTwRaHK6cAMWlfxzx"><div class="lb" data-page-node-id="X5xpj4CUAqBuCIyhrqQTOW">接口失败话术</div>
+        <input class="in" value="在忙，稍后回复你" style="max-width:260px" data-page-node-id="7sCVCWln5XrRTdeeopkATo"></div>
+    </div>
+  </div>
+
+  <!-- 9 日志 -->
+  <div class="page" id="p9" data-page-node-id="Ij4rBzhqLJyG7CW8Yso57p">
+    <h2 data-page-node-id="svCQ8VV5ZgmLpsbcTs7U1a">运行日志</h2>
+    <div class="sub" data-page-node-id="GwL8o8wjSBpVnTglzatSmB">敏感信息（授权码、Cookie、接口地址）不会写入日志</div>
+    <div class="card" data-page-node-id="590kVYirrylelqq7So2ghD">
+      <div class="row" style="margin-bottom:10px" data-page-node-id="vuFFO4MWGZxJ11m2k2h8Vh">
+        <span class="chip on" data-page-node-id="toOWoEisfFMNcjKjKn6F5H">全部</span><span class="chip" data-page-node-id="7MuyjywGtCjQkDv9RQcxOo">信息</span>
+        <span class="chip" data-page-node-id="1t8bYHgeBAXxVs6UOR384c">警告</span><span class="chip" data-page-node-id="TexVRaPElbTpASTaJQeIb2">错误</span>
+        <span class="spacer" data-page-node-id="ftNIS3Mqbjp8EcdCqNpLis"></span>
+        <input class="in" placeholder="过滤关键字" style="max-width:180px" data-page-node-id="zhDOtZnbSoyLo9E7Yek6ai">
+        <button class="btn sm" data-page-node-id="x7qie1xdKGDZIvpwosB82K">清空</button><button class="btn sm" data-page-node-id="1UCs5477vGHxus9s3yQCvn">导出</button>
+        <button class="btn sm" data-page-node-id="8DgnFHjviu47uv1FMw5zLM">打开日志目录</button>
+      </div>
+      <div class="log" data-page-node-id="ADHzQUwqHe8BsjfYppcCQm">
+<span class="i" data-page-node-id="EvdddZKtW4z3U0OzwAE1mb">09:12:03 INFO  [bot] 收到消息 群=资源交流一群 发送人=张三</span>
+<span class="i" data-page-node-id="uzEgeWmbxOpGQ3EU14ty2J">09:12:03 INFO  [bot] 命中搜索指令 keyword=三体 pan=quark</span>
+<span class="i" data-page-node-id="5hm2NuKZlbX3LJvAVmHmVB">09:12:04 INFO  [pansou] 搜索完成 共 116 条</span>
+<span class="s" data-page-node-id="sKQneQDvj6yH9odDE3BiOE">09:12:04 INFO  [bot] 已回复结果列表（第 1/15 页）</span>
+<span class="i" data-page-node-id="ycWwPLhaPgn6FNJrcrW244">09:12:31 INFO  [bot] 用户选择 #2</span>
+<span class="i" data-page-node-id="ldBlkiFzEevaq3cB8jKx0y">09:12:32 INFO  [transfer] 开始转存 pan=quark</span>
+<span class="s" data-page-node-id="1kcUNldhYkKbSCmLHPySVb">09:12:36 INFO  [transfer] 转存成功，已生成分享链接</span>
+<span class="w" data-page-node-id="F7G1SCKBjNWLWtrA6rAIoz">09:20:11 WARN  [transfer] 账号 阿里云盘 今日已达限额，切换到下一个账号</span>
+<span class="e" data-page-node-id="Ax7Zm96tfgF1WXokFaFxm1">09:31:02 ERROR [pansou] 搜索超时（20s），已重试 1/2</span>
+<span class="i" data-page-node-id="5DVsdNjSuTy1FoGAfjduS2">09:31:07 INFO  [pansou] 重试成功</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 10 关于 -->
+  <div class="page" id="p10" data-page-node-id="dTFo9NQXZo13PYYSh35OMQ">
+    <h2 data-page-node-id="z27wQ4C3kt9SJiy0TS5u5a">关于</h2>
+    <div class="sub" data-page-node-id="twbwepkLCGMt5ovWbwoXZ6"></div>
+    <div class="card" data-page-node-id="yrR90npEtAFbgT9gGp9sMp">
+      <div class="kv" style="margin-bottom:12px" data-page-node-id="XrqMnbofX0neGb3QCAziNG">
+        <div data-page-node-id="BKL8So7jvbnV9X8Gp3CcSh">产品<b data-page-node-id="nETz84vGK6BmMpm7mCXHJL">微信资源搜索机器人</b></div>
+        <div data-page-node-id="rJ2eapC0Cb4X8x3VZiCgCM">版本<b data-page-node-id="kMSGurBOYFJ7meNgxgwpOA">V1.0.0</b></div>
+        <div data-page-node-id="dwqXOAeo4w5RPHSyKeY1Fq">授权<b data-page-node-id="yKXUxzqiJihGiFh0B2gzGT">已激活 · 专业版</b></div>
+      </div>
+      <table data-page-node-id="IYKHGC3dfR9My8wdmZIXQa">
+        <tr data-page-node-id="TqHlVaLWZQOptVFC3rVClk"><th style="width:120px" data-page-node-id="aruvPpoAgLJZoY3CdDHlCU">组件</th><th data-page-node-id="dd4Of4Sx1kM3wxKHH6DZsr">版本</th></tr>
+        <tr data-page-node-id="nBv6YqPG4nkKlNwTZ7jAKU"><td data-page-node-id="EK8QIefwGDOopQdDfxkYOG">微信内核</td><td data-page-node-id="5neXetiyfSxkCyKvc3v8ku">wxautox4 41.1.1（Plus）</td></tr>
+        <tr data-page-node-id="wobyGO0HgZ9jwE7L5VYHOQ"><td data-page-node-id="hZ31KSaoqPgogZfYYDfCtH">免费回退内核</td><td data-page-node-id="p9RREc9V3ZZHnEwCmkYLpl">wxauto4 41.1.7</td></tr>
+        <tr data-page-node-id="FuKTTQUD9SGZ1CqOU7jcWN"><td data-page-node-id="mM1ex8xexFfJ15eHZudPlU">界面</td><td data-page-node-id="ealYW3AMSTqeaU5vYxp4tQ">PySide6 6.11</td></tr>
+        <tr data-page-node-id="B3q2XdPQV7pF1k6edOaKFM"><td data-page-node-id="Buh7yN0DUEU5xYShGCM6dq">Python</td><td data-page-node-id="XFmEynESa4M3KlTmPEdfDZ">3.13</td></tr>
+      </table>
+    </div>
+    <div class="card" data-page-node-id="4rvPxB9dsxuG98lUZ6TgPB">
+      <h3 data-page-node-id="KBAsvEMYaBVjzo30OK01F7">数据目录</h3>
+      <div class="row" data-page-node-id="OUV1ASYhYvnSAvtvc6kqnq"><div class="lb" data-page-node-id="4Z51WFNXgj73AoWAFZYYzJ">配置与数据</div>
+        <input class="in" value="D:\Bot\data\" readonly data-page-node-id="eGI4oHBStYvrWLcLEp4mJE">
+        <button class="btn sm" data-page-node-id="NjkEH9KReoeXAcq8QDG9RH">打开</button></div>
+      <div class="hint" data-page-node-id="7EWYX4rIeIyDvUNzoKhnnD">配置写在 exe 同级的 data/ 目录，换目录或换机器都会自动重建。</div>
+    </div>
+    <div class="card" data-page-node-id="IrTEEryIfyM3WmmtGcCVPa">
+      <h3 data-page-node-id="e1qQfPvISZx8ZzxGpYjDle">风险告知</h3>
+      <div style="font-size:12px;color:var(--tx2);line-height:1.8" data-page-node-id="iiiNhKhk1WnjqpBfzskPOP">
+        本软件基于 Windows UI 自动化操作你本人已登录的微信客户端，非微信官方接口。<br data-page-node-id="6yCC4oojwGUKrDK6oPDCdh">
+        请合理控制发送频率，避免批量营销与骚扰行为。因使用本软件导致的账号限制，由使用者自行承担。
+      </div>
+    </div>
+  </div>
+
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.nav button').forEach(function(b){
+  b.onclick=function(){
+    document.querySelectorAll('.nav button').forEach(function(x){x.classList.remove('on')});
+    document.querySelectorAll('.page').forEach(function(x){x.classList.remove('on')});
+    b.classList.add('on');
+    document.getElementById(b.dataset.p).classList.add('on');
+  };
+});
+document.querySelectorAll('.sw').forEach(function(s){
+  s.onclick=function(){s.classList.toggle('on')};
+});
+document.querySelectorAll('.chip').forEach(function(c){
+  if(c.textContent.indexOf('✕')<0){
+    c.onclick=function(){c.classList.toggle('on')};
+  }
+});
+</script>
+</body>
+</html>

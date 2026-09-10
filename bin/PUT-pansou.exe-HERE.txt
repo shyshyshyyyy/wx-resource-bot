@@ -1,0 +1,7 @@
+把 pansou 的 Windows 二进制放到这个目录，命名为 pansou.exe
+
+获取方式：
+  https://github.com/fish2018/pansou  →  Releases 下载 windows-amd64 版本
+  或自行编译： set GOOS=windows& set GOARCH=amd64& go build -ldflags "-s -w" -o pansou.exe .
+
+程序启动时会自动拉起它，端口被占用会自动往后找可用端口。
