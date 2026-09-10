@@ -2618,7 +2618,8 @@ class WXBot:
 
         self._poll_stop = threading.Event()
         self._poll_seen = {}
-        self._poll_count = {}         # 增量游标：每个聊天已消费的消息条数（只处理新追加的泡）
+        self._poll_count = {}         # 增量游标：每个聊天已消费的消息条数（正常增量路径用）
+        self._poll_last_fp = {}       # 指纹游标：每个聊天「最后一条已消费消息」的键（列表回缩时兜底定位）
         self._poll_targets = []
         self._poll_interval = 1.5     # 轮询间隔（秒），后续可在面板开放配置
         self._poll_seen_max = self.POLL_SEEN_MAX
@@ -2678,15 +2679,20 @@ class WXBot:
                 seen[self._msg_key(m, who)] = _t
             # 游标直接跳到当前条数：已存在的消息泡不会在增量路径被重新处理
             self._poll_count[who] = len(msgs)
+            # 指纹游标：记录最后一条消息的键，供列表回缩时兜底定位
+            if msgs:
+                self._poll_last_fp[who] = self._msg_key(msgs[-1], who)
 
     @staticmethod
     def _msg_key(m, who=None):
         # 关键：msg.id 只是「当前 UI 控件的运行时标识」，不是微信全局消息ID，
         # 切窗/重绘/控件复用都会让它变动甚至碰撞，绝不可单独用于持久去重。
-        # 采用「会话名 + 发送人 + 类型 + 属性 + 内容」组合主键：
-        # 同一聊天里这几项相同的，就视为同一条消息（内容级去重，会话期内只处理一次）。
+        # 采用「会话名 + 发送人 + 类型 + 内容」组合主键（内容级去重，会话期内只处理一次）。
+        # 注意：故意不含 attr —— attr(friend/self/system) 是切窗时的 UI 状态，可能在
+        # 重绘/滚动时波动；若纳入主键，同一条消息在切窗前后键值不同、去重直接失效。
+        # sender 本身已能区分我方回显(机器人昵称/self)与用户消息(好友昵称)。
         return (who or '', getattr(m, 'sender', ''), getattr(m, 'type', ''),
-                getattr(m, 'attr', ''), str(getattr(m, 'content', '')))
+                str(getattr(m, 'content', '')))
 
     @classmethod
     def _is_page_cmd(cls, content):
@@ -2737,9 +2743,19 @@ class WXBot:
                     # 用「已消费条数」做游标，每条泡只处理一次。注意：游标必须在每轮末尾
                     # 推进到 n，否则新消息会被每轮反复重读（历史 bug 根因）。
                     cursor = self._poll_count.get(who, 0)
-                    shrink = n < cursor     # 窗口回缩（重绘/截断）→ 放弃增量，整轮用 seen 兜底
+                    shrink = n < cursor     # 窗口回缩（重绘/截断）→ 条数游标失效
                     if shrink:
-                        cursor = 0
+                        # 回缩时条数游标不再可信：改用「指纹游标」定位上次处理到哪，
+                        # 只处理 last_fp 之后的新消息，避免 cursor=0 整段重扫（历史多时
+                        # 性能差，且大量历史命中去重会掩盖真正的新消息）。
+                        last_fp = self._poll_last_fp.get(who, "")
+                        start = -1
+                        if last_fp:
+                            for i in range(n - 1, -1, -1):
+                                if self._msg_key(msgs[i], who) == last_fp:
+                                    start = i
+                                    break
+                        cursor = start + 1 if start != -1 else 0
                     for m in msgs[cursor:]:
                         key = self._msg_key(m, who)
                         _content = str(getattr(m, 'content', '')).strip()
@@ -2786,6 +2802,9 @@ class WXBot:
                             log(level="ERROR", message=f"轮询处理 {who} 消息出错: {e}")
                     # 关键：推进游标到当前条数，下轮只处理末尾新追加的泡
                     self._poll_count[who] = n
+                    # 同步指纹游标：记录最后一条消息的键，供下轮回缩时定位
+                    if msgs:
+                        self._poll_last_fp[who] = self._msg_key(msgs[-1], who)
                     # LRU 限容：seen 超过上限时按时间淘汰最旧一半，避免无限增长
                     if len(seen) > _max:
                         items = sorted(seen.items(), key=lambda kv: kv[1])
