@@ -2694,7 +2694,14 @@ class WXBot:
         return bool(content) and content.strip() in cls._PAGE_CMD_WORDS
 
     def _mark_chat_seen(self, who):
-        """发送成功后调用：把该聊天的消息全部标记为已读（避开轮询去重的竞态窗口）。"""
+        """发送成功后调用：只把「我方刚发出的回显」(attr=self) 标记为已读。
+
+        关键：绝不标记用户消息(attr=friend/system)。否则用户抢在发送窗口内发来的
+        「下一页」等指令会被误标成已读，后续轮询（尤其 shrink 回缩分支的
+        `is_page and shrink and key in seen`）据此跳过，导致漏处理——这是
+        「发送下一页后很久没反应 / 连续两次下一页都没被处理」的根因。
+        我方回显本身已被轮询的 `attr=='self'` 分支跳过，这里只做额外兜底。
+        """
         if who not in [t[0] for t in self._poll_targets]:
             return
         try:
@@ -2702,6 +2709,8 @@ class WXBot:
             seen = self._poll_seen.setdefault(who, {})
             _t = time.time()
             for m in msgs:
+                if getattr(m, 'attr', '') != 'self':
+                    continue
                 seen[self._msg_key(m, who)] = _t
         except Exception:
             pass
@@ -2734,27 +2743,36 @@ class WXBot:
                     for m in msgs[cursor:]:
                         key = self._msg_key(m, who)
                         _content = str(getattr(m, 'content', '')).strip()
+                        _attr = getattr(m, 'attr', '')
+                        _type = getattr(m, 'type', '')
+                        _sender = getattr(m, 'sender', '')
                         # 分页指令（下一页/上一页）豁免内容去重：连续翻页时每条都要执行。
                         # 正常增量路径下每条翻页都是末尾新泡，逐条执行不重不漏；
                         # 仅在 shrink（列表回缩）时也查 seen，避免历史里的分页指令被重放。
                         is_page = self._is_page_cmd(_content)
                         if not is_page and key in seen:
+                            # 正常去重：shrink 重扫历史时大量出现，属预期不刷屏；
+                            # 非 shrink 时命中 seen 说明这条「新」消息被误标已读过（用户消息），值得提示。
+                            if not shrink and _attr != 'self':
+                                log(message=f"[轮询·跳过] {who} 「{_content}」(来自{_sender}) 内容重复已处理过")
                             continue
                         if is_page and shrink and key in seen:
+                            # 分页指令在窗口回缩时被判「已处理」而跳过——这正可能是漏翻页的信号，重点提示。
+                            log(level="WARNING",
+                                message=f"[轮询·跳过] {who} 分页指令「{_content}」在窗口回缩时被判已处理，已跳过（如属漏翻页请关注）")
                             continue
                         seen[key] = _t
-                        attr = getattr(m, 'attr', '')
                         # 非管理员聊天里「我方自回」消息（attr=self）直接跳过，
                         # 避免把机器人自己的回复再次喂给处理逻辑。
-                        if attr == 'self' and who != self.config.cmd:
+                        if _attr == 'self' and who != self.config.cmd:
                             continue
                         # 系统/时间类消息（聊天内的时间分隔线、撤回/入群提示等）不触发任何回复，
                         # 否则会被当成「新消息」反复进入 AI 路径，进而在未配置接口时狂发「在忙」
-                        if attr == 'system' or getattr(m, 'type', '') == 'time':
+                        if _attr == 'system' or _type == 'time':
                             continue
                         # 管理员聊天里用户指令也是 self，需排除「我刚发出的回复」回显
-                        if attr == 'self' and who == self.config.cmd:
-                            content = str(getattr(m, 'content', '')).strip()
+                        if _attr == 'self' and who == self.config.cmd:
+                            content = _content
                             # 终极兜底：机器人自己生成的状态/结果行（以 emoji 图标开头）
                             # 一律跳过，即使 seen 因极端情况漏判也不会把回显当指令反复重跑
                             if self._is_bot_line(content):
