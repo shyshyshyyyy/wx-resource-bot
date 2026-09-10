@@ -2581,12 +2581,14 @@ class WXBot:
     # 免费版轮询监听（wxauto4 多聊监听的替代实现）
     # ----------------------------------------------------------
 
-    # 已处理消息的"记忆窗口"(秒)：窗口内相同内容不再重复执行，杜绝指令循环重放；
-    # 窗口过后若用户再次发送完全相同的内容，仍会重新执行（允许用户主动重跑）。
-    POLL_SEEN_TTL = 120
+    # 已处理消息指纹（内容主键）的会话级容量上限：超过后按时间淘汰最旧一半。
+    # 去重不再依赖短 TTL——旧实现 120s 到期后历史消息指纹被清理，而 GetAllMessage
+    # 每次都返回全部可见历史消息，导致历史消息每 120s 被周期性重放（"一直重复处理
+    # 旧消息"）。改为「整个会话期间相同内容只处理一次」，从根上杜绝旧消息重放。
+    POLL_SEEN_MAX = 3000
 
     # 分页指令词集：下一页/上一页等。这些指令需要「每次都执行」——用户连续翻页时
-    # 两次内容完全相同，若走内容去重窗口会被静默丢弃（现象：执行一次，第二次不执行）。
+    # 两次内容完全相同，若走内容去重会被静默丢弃（现象：执行一次，第二次不执行）。
     # 由于其回复是结果页、永远不是分页词本身，豁免内容去重无「指令循环重放」风险。
     _PAGE_CMD_WORDS = frozenset(
         list(getattr(_session, "NEXT_WORDS", set()))
@@ -2619,7 +2621,7 @@ class WXBot:
         self._poll_count = {}         # 增量游标：每个聊天已消费的消息条数（只处理新追加的泡）
         self._poll_targets = []
         self._poll_interval = 1.5     # 轮询间隔（秒），后续可在面板开放配置
-        self._poll_seen_ttl = self.POLL_SEEN_TTL
+        self._poll_seen_max = self.POLL_SEEN_MAX
 
         cmd = self.config.cmd
         if cmd:
@@ -2654,13 +2656,23 @@ class WXBot:
                    f"{[t[0] for t in self._poll_targets]}")
 
     def _seed_poll_seen(self):
-        """把当前各聊天历史消息标记为已读（游标+seen 双保险），避免启动即回放旧消息。"""
+        """把当前各聊天历史消息标记为已读（游标+seen 双保险），避免启动即回放旧消息。
+
+        关键：启动瞬间微信窗口可能未就绪，GetAllMessage 会读到空列表或抛异常；
+        若此时直接以 0 作为游标，第一轮轮询会把整段历史消息当新消息全量回放。
+        因此对「读不到消息」做重试，确保窗口稳定后再定游标。
+        """
         _t = time.time()
         for who, _t2 in self._poll_targets:
-            try:
-                msgs = self.wx.read_messages(who)
-            except Exception:
-                msgs = []
+            msgs = []
+            for _attempt in range(3):
+                try:
+                    msgs = self.wx.read_messages(who)
+                except Exception:
+                    msgs = []
+                if msgs:
+                    break
+                time.sleep(0.8)
             seen = self._poll_seen.setdefault(who, {})
             for m in msgs:
                 seen[self._msg_key(m, who)] = _t
@@ -2671,10 +2683,15 @@ class WXBot:
     def _msg_key(m, who=None):
         # 关键：msg.id 只是「当前 UI 控件的运行时标识」，不是微信全局消息ID，
         # 切窗/重绘/控件复用都会让它变动甚至碰撞，绝不可单独用于持久去重。
-        # 采用「会话名 + 发送人 + 类型 + 属性 + 内容 + 时间窗口(TTL)」组合主键：
-        # 同一聊天里这几项相同的，就是同一条消息；时间窗口用 self._poll_seen 的 value 控制。
+        # 采用「会话名 + 发送人 + 类型 + 属性 + 内容」组合主键：
+        # 同一聊天里这几项相同的，就视为同一条消息（内容级去重，会话期内只处理一次）。
         return (who or '', getattr(m, 'sender', ''), getattr(m, 'type', ''),
                 getattr(m, 'attr', ''), str(getattr(m, 'content', '')))
+
+    @classmethod
+    def _is_page_cmd(cls, content):
+        """是否分页指令（下一页/上一页等）。这些词需要连续执行，豁免内容级去重。"""
+        return bool(content) and content.strip() in cls._PAGE_CMD_WORDS
 
     def _mark_chat_seen(self, who):
         """发送成功后调用：把该聊天的消息全部标记为已读（避开轮询去重的竞态窗口）。"""
@@ -2699,7 +2716,7 @@ class WXBot:
         while not self._poll_stop.is_set():
             try:
                 _t = _now()
-                _ttl = self._poll_seen_ttl
+                _max = self._poll_seen_max
                 for who, chat_type in self._poll_targets:
                     if self._poll_stop.is_set():
                         break
@@ -2708,9 +2725,8 @@ class WXBot:
                     seen = self._poll_seen.setdefault(who, {})
                     # 增量游标：只处理「自上次轮询以来新追加」的消息泡。
                     # GetAllMessage 返回当前窗口按时间排序的全部消息，新消息只会在末尾追加；
-                    # 用「已消费条数」做游标，每条泡只处理一次，天然杜绝「同一泡被反复重读
-                    # → 下一页无限循环」；用户连续翻页时每发一条新的「下一页」都是末尾新泡，
-                    # 会被正常逐条执行，不会漏翻。
+                    # 用「已消费条数」做游标，每条泡只处理一次。注意：游标必须在每轮末尾
+                    # 推进到 n，否则新消息会被每轮反复重读（历史 bug 根因）。
                     cursor = self._poll_count.get(who, 0)
                     shrink = n < cursor     # 窗口回缩（重绘/截断）→ 放弃增量，整轮用 seen 兜底
                     if shrink:
@@ -2718,9 +2734,13 @@ class WXBot:
                     for m in msgs[cursor:]:
                         key = self._msg_key(m, who)
                         _content = str(getattr(m, 'content', '')).strip()
-                        # shrink 兜底路径用内容主键+TTL 去重，连分页指令也拦，避免旧「下一页」重放；
-                        # 增量路径不查 seen（新泡主键唯一，且连续翻页的下一页是不同泡）。
-                        if shrink and key in seen and (_t - seen[key]) < _ttl:
+                        # 分页指令（下一页/上一页）豁免内容去重：连续翻页时每条都要执行。
+                        # 正常增量路径下每条翻页都是末尾新泡，逐条执行不重不漏；
+                        # 仅在 shrink（列表回缩）时也查 seen，避免历史里的分页指令被重放。
+                        is_page = self._is_page_cmd(_content)
+                        if not is_page and key in seen:
+                            continue
+                        if is_page and shrink and key in seen:
                             continue
                         seen[key] = _t
                         attr = getattr(m, 'attr', '')
@@ -2746,11 +2766,13 @@ class WXBot:
                             self.message_handle_callback(m, chat)
                         except Exception as e:
                             log(level="ERROR", message=f"轮询处理 {who} 消息出错: {e}")
-                    # 控制 seen 字典大小并清理窗口外过期项，避免无限增长
-                    # （seen 为空时不能 min()，否则抛异常导致整轮轮询崩溃）
-                    if seen and (len(seen) > 500 or _t - min(seen.values()) > _ttl):
-                        self._poll_seen[who] = {k: v for k, v in seen.items()
-                                                if (_t - v) < _ttl}
+                    # 关键：推进游标到当前条数，下轮只处理末尾新追加的泡
+                    self._poll_count[who] = n
+                    # LRU 限容：seen 超过上限时按时间淘汰最旧一半，避免无限增长
+                    if len(seen) > _max:
+                        items = sorted(seen.items(), key=lambda kv: kv[1])
+                        keep = items[len(items) - max(1, _max // 2):]
+                        self._poll_seen[who] = dict(keep)
                 # 轮询结束后切回管理员聊天，让微信主窗口停在文件传输助手
                 try:
                     self.wx.ChatWith(self.config.cmd)
