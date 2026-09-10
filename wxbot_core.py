@@ -133,16 +133,29 @@ class _WxSendRecorder:
         return result
 
     def read_messages(self, who):
-        """切到指定聊天并读取全部消息（加锁串行化）。"""
+        """切到指定聊天并读取全部消息（加锁串行化）。
+
+        关键：wxauto4 的 ChatWith 是「搜索/点击会话」切窗，点击后窗口切换是
+        异步的（默认 force=False 不等待）。若切窗后立即 GetAllMessage，会读到
+        上一个窗口（如文件传输助手）的残留消息——轮询会把错误窗口的消息计入
+        游标/指纹，导致目标聊天真正的新消息被整段漏读（"不停切窗口却漏消息"
+        的根因）。这里切窗后等待窗口切换渲染完成再读，并对空读做一次重试。
+        """
         with self.lock:
-            try:
-                self._real.ChatWith(who)
-            except Exception:
-                pass
-            try:
-                return self._real.GetAllMessage()
-            except Exception:
-                return []
+            for _attempt in range(2):
+                try:
+                    self._real.ChatWith(who)
+                except Exception:
+                    pass
+                # 等待微信窗口切换/渲染完成（参考 wxauto4 force_wait=0.5 的经验值）
+                time.sleep(0.4)
+                try:
+                    msgs = self._real.GetAllMessage()
+                except Exception:
+                    msgs = []
+                if msgs:
+                    return msgs
+            return []
 
     def recent_self(self, who):
         with self._rlock:
