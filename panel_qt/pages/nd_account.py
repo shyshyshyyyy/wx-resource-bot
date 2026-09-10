@@ -41,7 +41,7 @@ ROOT_IDS = {
 #   Basic 令牌类     ：移动                  —— Authorization 的 Basic 令牌或 Cookie
 CRED_LABEL = {
     "quark": "Cookie", "baidu": "Cookie", "uc": "Cookie", "tianyi": "Cookie",
-    "aliyun": "refresh_token", "xunlei": "refresh_token / Cookie",
+    "aliyun": "refresh_token", "xunlei": "refresh_token",
     "guangya": "refresh_token", "mobile": "Authorization 令牌 / Cookie",
 }
 CRED_TIP = {
@@ -50,7 +50,7 @@ CRED_TIP = {
     "uc": "UC 网盘 Cookie：登录 drive.uc.cn → F12 → 复制 Cookie 整串。",
     "tianyi": "天翼云盘 Cookie：登录 cloud.189.cn → F12 → 复制 Cookie 整串。",
     "aliyun": "阿里云盘 refresh_token（⚠️ 不是 Cookie）：取 refresh_token 长串粘贴。",
-    "xunlei": "迅雷云盘 refresh_token（XLUserToken，也可贴 Cookie）：登录 pan.xunlei.com 后取 refresh_token。",
+    "xunlei": "迅雷云盘 refresh_token：登录 pan.xunlei.com → F12 → 网络请求里找 refresh_token（以 a1. 开头，不是 eyJ 开头的 access_token，也不是浏览器 Cookie）。",
     "guangya": "光鸭 refresh_token（⚠️ 不是 Cookie、也不是 eyJ 开头的 access_token！）：可点「手机验证码登录」用手机号+短信登录自动获取，或登录 guangyapan.com 后从 devtools 复制 refresh_token（gy. 开头）。若提示 token does not match，填一下「设备ID」与官网一致。",
     "mobile": "移动云盘：Authorization 的 Basic 令牌（可带 Basic 前缀，会自动去掉），也可直接贴 Cookie。",
 }
@@ -362,6 +362,10 @@ class AccountDialog(QDialog):
         self.setWindowTitle("网盘账号")
         self.resize(560, 520)
         d = data or {}
+        # 保留传入账号的 id（编辑场景），让「校验凭据」和「保存后检测」用同一个
+        # acc_id 读写令牌缓存，避免迅雷 refresh_token 轮转写到 default_*.json、
+        # 而保存后检测读 {真实id}_*.json（空）→ 回退到已作废旧令牌的割裂问题。
+        self._acc_id = d.get("id", "")
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 16, 18, 16)
@@ -579,7 +583,7 @@ class AccountDialog(QDialog):
         self._refresh_dir_labels()
 
     def data(self):
-        return {
+        out = {
             "pan": self._pan_key(),
             "name": self.e_name.text().strip() or "账号1",
             "enabled": self.ck_on.isChecked(),
@@ -592,6 +596,10 @@ class AccountDialog(QDialog):
             "temp_dir_id": self.temp_id,
             "temp_dir_name": self.temp_name,
         }
+        # 带 id：编辑场景让校验/保存走同一 acc_id；新增场景由 on_add 预生成后传入。
+        if self._acc_id:
+            out["id"] = self._acc_id
+        return out
 
 
 @register("nd_account")
@@ -696,11 +704,15 @@ def build(page, mw):
             _row(acc)
 
     def on_add():
-        dlg = AccountDialog(mw)
+        # 先定 id 再开对话框：让对话框里「校验凭据」和「保存后自动检测」共用同一
+        # acc_id 读写令牌缓存。否则校验阶段 acc 无 id（落到 default_*.json），
+        # 保存后检测读 {新id}_*.json（空）→ 迅雷轮转出的新 refresh_token 丢失。
+        new_id = uuid.uuid4().hex[:10]
+        dlg = AccountDialog(mw, data={"id": new_id})
         if dlg.exec() != QDialog.Accepted:
             return
         data = dlg.data()
-        data["id"] = uuid.uuid4().hex[:10]
+        data.setdefault("id", new_id)
         data.update({"status": "unknown", "last_check": 0})
         if CM:
             c = CM.load_config()

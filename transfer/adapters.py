@@ -427,8 +427,8 @@ class XunleiAdapter(_HttpAdapter):
                 self._xunlei_debug("token_exchange_fail", response=res)
                 raise TransferError(
                     "迅雷登录失效，请重新获取 refresh_token。"
-                    "注意：凭据里应填 refresh_token（以 eyJ 或长串字符开头），"
-                    "不是 access_token，也不是浏览器 Cookie。详情见 xunlei_debug.log",
+                    "注意：迅雷 refresh_token 以 a1. 开头（eyJ 开头的是 access_token，"
+                    "不是 refresh_token），也不是浏览器 Cookie。详情见 xunlei_debug.log",
                     invalid_account=True)
             new = {"access_token": tok,
                    "refresh_token": res.get("refresh_token") or rt,
