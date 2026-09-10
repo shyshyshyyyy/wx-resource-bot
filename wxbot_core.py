@@ -70,12 +70,12 @@ globals().update({_k: getattr(_wxmsgs, _k) for _k in dir(_wxmsgs)
 is_wxautox = (CORE == CORE_PLUS)  # True=Plus 版，False=免费版（能力已降级）
 
 # ============================================================
-# 免费版（wxauto4）轮询监听支持
+# 免费版（wxauto4）监听：回调优先 + 轮询兜底
 #
-# wxauto4 免费版的 AddListenChat 同时只能监听「一个」聊天，且会把目标聊天
-# 独立成子窗口（放大 + 抢占微信主窗口）。因此免费版改用「轮询」：定时切到各
-# 配置聊天、读取最新消息、按消息 id 去重后喂给现有回调，从而支持多私聊/多群
-# 同时监听，且不再创建子窗口、不再放大/最小化微信。Plus 版仍走原生回调。
+# 实测（v2.7.3 免费版 + wxauto4 41.1.7）：免费版 AddListenChat 支持多聊回调监听
+# （每个聊天一个子窗口 + 推送回调），交互正常不漏消息。此前误判「只能监听一个」而
+# 改走轮询，但 ChatWith 切窗是异步的、轮询反复漏消息。现免费版与 Plus 版一致走
+# AddListenChat 回调监听；轮询(_poll_loop)保留为 AddListenChat 不可用时的兜底。
 # ============================================================
 import threading
 from collections import deque
@@ -2842,11 +2842,8 @@ class WXBot:
                         items = sorted(seen.items(), key=lambda kv: kv[1])
                         keep = items[len(items) - max(1, _max // 2):]
                         self._poll_seen[who] = dict(keep)
-                # 轮询结束后切回管理员聊天，让微信主窗口停在文件传输助手
-                try:
-                    self.wx.ChatWith(self.config.cmd)
-                except Exception:
-                    pass
+                # 注意：不再每轮末尾 ChatWith(文件传输助手) 切回。该操作每轮多切一次窗口，
+                # 是切窗竞态（读错窗口→漏消息）的额外来源；发送/读取都已显式切窗，不依赖它。
             except Exception as e:
                 log(level="ERROR", message=f"轮询循环异常: {e}")
             self._poll_stop.wait(self._poll_interval)
@@ -2942,11 +2939,55 @@ class WXBot:
 
             self._verify_initial_listeners(expected_listeners)
         else:
-            # 免费版（wxauto4）：AddListenChat 同时只能监听一个聊天，且会抢占窗口。
-            # 改用轮询方式读取各聊天最新消息，从而支持多私聊/多群同时监听，
-            # 且不再创建独立子窗口、不再放大/最小化微信主窗口。
-            log(message='启动轮询监听器(免费版，支持多聊同时监听)...')
-            self._start_poll_listeners()
+            # 免费版（wxauto4）：改用 AddListenChat 回调监听（每个聊天一个子窗口 + 推送回调，
+            # 不漏消息）。此前误以为「免费版 AddListenChat 只能监听一个聊天」而改走轮询，
+            # 但 ChatWith 切窗是异步的、轮询反复漏消息（用户实测 v2.7.3 免费版回调监听交互正常）。
+            # 轮询方案保留为兜底，若 AddListenChat 不可用再回退。
+            log(message='启动wxauto4监听器(回调模式，对齐 v2.7.3)...')
+            self.wx.StopListening()
+            time.sleep(1)
+            self.wx.StartListening()
+
+            expected_listeners = []
+
+            # 添加管理员账号监听（管理员始终监听，不受白名单模式限制）
+            time.sleep(0.5)
+            self._add_listen_chat_once(self.config.cmd, "管理员")
+            expected_listeners.append(self.config.cmd)
+
+            # 白名单模式下逐一添加用户监听
+            if not self.config.AllListen_switch:
+                log(message="白名单模式开启")
+                for user in self.config.listen_list:
+                    time.sleep(0.5)
+                    self._add_listen_chat_once(user, "用户")
+                    expected_listeners.append(user)
+
+            # 若群机器人开关开启，则添加群聊监听
+            if self.config.group_switch:
+                for user in self.config.group:
+                    time.sleep(0.5)
+                    self._add_listen_chat_once(user, "群组")
+                    expected_listeners.append(user)
+
+            # 注册自定义转发监听（跳过已在私聊/群组列表中的来源，避免重复注册）
+            if self.config.custom_forward_switch:
+                _listened_groups = set(self.config.group) if self.config.group_switch else set()
+                _already_listened = set(self.config.listen_list) | _listened_groups | {self.config.cmd}
+                _fwd_sources = set()
+                for _rule in self.config.custom_forward_list:
+                    if _rule.get('all_sources', False):
+                        continue
+                    for _src in _rule.get('sources', []):
+                        if _src:
+                            _fwd_sources.add(_src)
+                for _source in _fwd_sources:
+                    if _source and _source not in _already_listened:
+                        time.sleep(0.5)
+                        self._add_listen_chat_once(_source, "自定义转发监听源")
+                        expected_listeners.append(_source)
+
+            self._verify_initial_listeners(expected_listeners)
 
         # 注册定时消息任务（新版：支持多种重复类型）
         if self.config.scheduled_msg_switch:
@@ -4505,28 +4546,18 @@ class WXBot:
         user_to_add = re.sub("/添加用户", "", message.content).strip()
         self.config.add_user(user_to_add)
         if not self.config.AllListen_switch:
-            if is_wxautox:
-                # 白名单模式 + Plus 版：向 wxautox 注册回调监听
-                result = self.wx.AddListenChat(nickname=user_to_add, callback=self.message_handle_callback)
-                if result:
-                    log(message=f"添加用户 {user_to_add} 监听完成")
-                    return chat.SendMsg('添加用户完成\n' + ", ".join(self.config.listen_list))
-                else:
-                    # 注册失败则回滚配置
-                    self.config.remove_user(user_to_add)
-                    log(level="ERROR", message=f"添加用户 {user_to_add} 监听失败, {result['message']}")
-                    return chat.SendMsg(
-                        f"添加用户失败\n{result['message']}\n" + ", ".join(self.config.listen_list)
-                    )
+            # 白名单模式：向内核注册回调监听（免费版与 Plus 版一致，AddListenChat 推送式不漏消息）
+            result = self.wx.AddListenChat(nickname=user_to_add, callback=self.message_handle_callback)
+            if result:
+                log(message=f"添加用户 {user_to_add} 监听完成")
+                return chat.SendMsg('添加用户完成\n' + ", ".join(self.config.listen_list))
             else:
-                # 免费版：加入轮询目标（多聊监听靠轮询实现），不调用 AddListenChat
-                _exists = [t for t in getattr(self, '_poll_targets', []) if t[0] == user_to_add]
-                if user_to_add and user_to_add != self.config.cmd and not _exists:
-                    self._poll_targets.append((user_to_add, "friend"))
-                    self._poll_seen.setdefault(user_to_add, {})
-                    self._seed_poll_seen()
-                log(message=f"添加用户 {user_to_add} 到轮询监听")
-                return chat.SendMsg('添加用户完成(轮询)\n' + ", ".join(self.config.listen_list))
+                # 注册失败则回滚配置
+                self.config.remove_user(user_to_add)
+                log(level="ERROR", message=f"添加用户 {user_to_add} 监听失败, {result['message']}")
+                return chat.SendMsg(
+                    f"添加用户失败\n{result['message']}\n" + ", ".join(self.config.listen_list)
+                )
         else:
             # 黑名单模式下只更新配置，无需注册监听
             return chat.SendMsg('添加用户完成(黑名单)\n' + ", ".join(self.config.listen_list))
@@ -4534,11 +4565,7 @@ class WXBot:
     def handle_remove_user(self, chat, message):
         """处理 /删除用户 指令：移除用户的监听注册并从配置中删除"""
         user_to_remove = re.sub("/删除用户", "", message.content).strip()
-        if is_wxautox:
-            self.wx.RemoveListenChat(user_to_remove)
-        else:
-            self._poll_targets = [t for t in getattr(self, '_poll_targets', []) if t[0] != user_to_remove]
-            self._poll_seen.pop(user_to_remove, None)
+        self.wx.RemoveListenChat(user_to_remove)
         self.config.remove_user(user_to_remove)
         return chat.SendMsg('删除用户完成\n' + ", ".join(self.config.listen_list))
 
@@ -4555,38 +4582,25 @@ class WXBot:
         new_group = re.sub("/添加群", "", message.content).strip()
         self.config.add_group(new_group)
         if self.config.group_switch:
-            if is_wxautox:
-                result = self.wx.AddListenChat(nickname=new_group, callback=self.message_handle_callback)
-                if result:
-                    log(message=f"添加群组 {new_group} 监听完成")
-                    return chat.SendMsg('添加群完成\n' + ", ".join(self.config.group))
-                else:
-                    # 注册失败则回滚配置
-                    self.config.remove_group(new_group)
-                    log(level="ERROR", message=f"添加群组 {new_group} 监听失败, {result['message']}")
-                    return chat.SendMsg(
-                        f"添加群失败\n{result['message']}\n" + ", ".join(self.config.group)
-                    )
+            # 免费版与 Plus 版一致：向内核注册回调监听
+            result = self.wx.AddListenChat(nickname=new_group, callback=self.message_handle_callback)
+            if result:
+                log(message=f"添加群组 {new_group} 监听完成")
+                return chat.SendMsg('添加群完成\n' + ", ".join(self.config.group))
             else:
-                # 免费版：加入轮询目标
-                _exists = [t for t in getattr(self, '_poll_targets', []) if t[0] == new_group]
-                if new_group and not _exists:
-                    self._poll_targets.append((new_group, "group"))
-                    self._poll_seen.setdefault(new_group, {})
-                    self._seed_poll_seen()
-                log(message=f"添加群组 {new_group} 到轮询监听")
-                return chat.SendMsg('添加群完成(轮询)\n' + ", ".join(self.config.group))
+                # 注册失败则回滚配置
+                self.config.remove_group(new_group)
+                log(level="ERROR", message=f"添加群组 {new_group} 监听失败, {result['message']}")
+                return chat.SendMsg(
+                    f"添加群失败\n{result['message']}\n" + ", ".join(self.config.group)
+                )
         else:
             return chat.SendMsg('添加群完成(群机器人未开启)\n' + ", ".join(self.config.group))
 
     def handle_remove_group(self, chat, message):
         """处理 /删除群 指令：移除群组的监听注册并从配置中删除"""
         group_to_remove = re.sub("/删除群", "", message.content).strip()
-        if is_wxautox:
-            self.wx.RemoveListenChat(group_to_remove)
-        else:
-            self._poll_targets = [t for t in getattr(self, '_poll_targets', []) if t[0] != group_to_remove]
-            self._poll_seen.pop(group_to_remove, None)
+        self.wx.RemoveListenChat(group_to_remove)
         self.config.remove_group(group_to_remove)
         return chat.SendMsg('删除群完成\n' + ", ".join(self.config.group))
 
