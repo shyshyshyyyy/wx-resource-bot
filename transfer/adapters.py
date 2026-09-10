@@ -90,8 +90,8 @@ class _HttpAdapter(BaseAdapter):
     SHARE_RE = r""
     NAME = "网盘"
 
-    def __init__(self, account):
-        super().__init__(account)
+    def __init__(self, account, cfg=None, save_fn=None):
+        super().__init__(account, cfg=cfg, save_fn=save_fn)
         self.acc_id = account.get("id") or "default"
         self.s = requests.Session()
         self.s.headers.update({"User-Agent": UA})
@@ -161,8 +161,8 @@ class _QuarkFamily(_HttpAdapter):
     ORIGIN = "https://pan.quark.cn"
     IMPLEMENTED = True
 
-    def __init__(self, account):
-        super().__init__(account)
+    def __init__(self, account, cfg=None, save_fn=None):
+        super().__init__(account, cfg=cfg, save_fn=save_fn)
         self.s.headers.update({
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9",
@@ -358,8 +358,8 @@ class XunleiAdapter(_HttpAdapter):
     CLIENT_ID = "Xqp0kJBXWhwaTpB6"
     DEVICE_ID = "925b7631473a13716b791d7f28289cad"
 
-    def __init__(self, account):
-        super().__init__(account)
+    def __init__(self, account, cfg=None, save_fn=None):
+        super().__init__(account, cfg=cfg, save_fn=save_fn)
         # 迅雷的「Cookie」字段填的是 refresh_token
         self.refresh_token = (self.cookie or "").strip()
         self.s.headers.update({
@@ -607,8 +607,8 @@ class AliyunAdapter(_HttpAdapter):
     SHARE_RE = r"(?:aliyundrive|alipan)\.com/s/([0-9a-zA-Z]+)"
     IMPLEMENTED = True
 
-    def __init__(self, account):
-        super().__init__(account)
+    def __init__(self, account, cfg=None, save_fn=None):
+        super().__init__(account, cfg=cfg, save_fn=save_fn)
         # 阿里的「Cookie」字段填的是 refresh_token
         self.refresh_token = (self.cookie or "").strip()
         self.s.headers.update({
@@ -801,8 +801,8 @@ class BaiduAdapter(_HttpAdapter):
         111: "有转存任务正在进行，请稍后再试", 404: "转存失败，请稍后重试",
     }
 
-    def __init__(self, account):
-        super().__init__(account)
+    def __init__(self, account, cfg=None, save_fn=None):
+        super().__init__(account, cfg=cfg, save_fn=save_fn)
         self.s.headers.update({"Referer": "https://pan.baidu.com",
                                "Cookie": self.cookie})
         self.bdstoken = ""
@@ -1021,8 +1021,8 @@ class GuangyaAdapter(_HttpAdapter):
     TASK_POLL_TIMES = 20
     TASK_POLL_INTERVAL = 1.0
 
-    def __init__(self, account):
-        super().__init__(account)
+    def __init__(self, account, cfg=None, save_fn=None):
+        super().__init__(account, cfg=cfg, save_fn=save_fn)
         raw = (account.get("cookie") or "").strip()
         if raw.upper().startswith("AT:"):
             self._refresh_token = ""
@@ -1322,8 +1322,8 @@ class MobileAdapter(_HttpAdapter):
     TASK_POLL_INTERVAL = 1.0
     _SUCCESS_STATUS = ("succeed", "success", "2")
 
-    def __init__(self, account):
-        super().__init__(account)
+    def __init__(self, account, cfg=None, save_fn=None):
+        super().__init__(account, cfg=cfg, save_fn=save_fn)
         raw = (account.get("cookie") or "").strip()
         # authorization 优先；以 Basic 开头 / pc: 开头 / 一长串无等号的都当令牌。
         # 注意：移动 Basic 令牌形如 pc:<手机号>:<令牌>，令牌段常带 "=" 填充，
