@@ -2737,6 +2737,14 @@ class WXBot:
                         break
                     msgs = self.wx.read_messages(who)
                     n = len(msgs)
+                    # 空读保护：切窗失败/窗口未渲染完成时 GetAllMessage 会返回空列表。
+                    # 此时绝不动游标与指纹——否则会把 _poll_count 清零、把 _poll_last_fp
+                    # 污染成错误窗口的指纹，导致后续真正的新消息被整段漏读
+                    # （"不停切换窗口却总是漏消息"的根因之一）。
+                    if n == 0:
+                        log(level="WARNING",
+                            message=f"[轮询] {who} 读取 0 条（切窗可能未就绪），跳过本轮、游标与指纹保持不变")
+                        continue
                     seen = self._poll_seen.setdefault(who, {})
                     # 增量游标：只处理「自上次轮询以来新追加」的消息泡。
                     # GetAllMessage 返回当前窗口按时间排序的全部消息，新消息只会在末尾追加；
@@ -2744,7 +2752,10 @@ class WXBot:
                     # 推进到 n，否则新消息会被每轮反复重读（历史 bug 根因）。
                     cursor = self._poll_count.get(who, 0)
                     shrink = n < cursor     # 窗口回缩（重绘/截断）→ 条数游标失效
+                    rescan_all = False      # 是否整段重扫（last_fp 也找不到，才需要 seen 兜底防重放）
                     if shrink:
+                        log(level="WARNING",
+                            message=f"[轮询] {who} 窗口回缩：上轮 {cursor} 条 → 本轮 {n} 条，改用指纹游标定位")
                         # 回缩时条数游标不再可信：改用「指纹游标」定位上次处理到哪，
                         # 只处理 last_fp 之后的新消息，避免 cursor=0 整段重扫（历史多时
                         # 性能差，且大量历史命中去重会掩盖真正的新消息）。
@@ -2755,7 +2766,13 @@ class WXBot:
                                 if self._msg_key(msgs[i], who) == last_fp:
                                     start = i
                                     break
-                        cursor = start + 1 if start != -1 else 0
+                        if start != -1:
+                            cursor = start + 1   # 指纹定位成功：只处理 last_fp 之后的新消息
+                        else:
+                            cursor = 0           # last_fp 也被顶出：整段重扫，靠 seen 兜底
+                            rescan_all = True
+                            log(level="WARNING",
+                                message=f"[轮询] {who} 指纹(last_fp)未被定位到，整段重扫并靠 seen 兜底防重放")
                     for m in msgs[cursor:]:
                         key = self._msg_key(m, who)
                         _content = str(getattr(m, 'content', '')).strip()
@@ -2772,10 +2789,12 @@ class WXBot:
                             if not shrink and _attr != 'self':
                                 log(message=f"[轮询·跳过] {who} 「{_content}」(来自{_sender}) 内容重复已处理过")
                             continue
-                        if is_page and shrink and key in seen:
-                            # 分页指令在窗口回缩时被判「已处理」而跳过——这正可能是漏翻页的信号，重点提示。
+                        if is_page and rescan_all and key in seen:
+                            # 仅当 last_fp 也被顶出、整段重扫历史时，才用 seen 兜底防分页指令重放。
+                            # 若指纹定位成功（只扫 last_fp 之后的新消息），分页指令是真正的新翻页，
+                            # 绝不能用 seen 跳过——否则「连续两次下一页」会被误判漏翻（历史 bug 根因）。
                             log(level="WARNING",
-                                message=f"[轮询·跳过] {who} 分页指令「{_content}」在窗口回缩时被判已处理，已跳过（如属漏翻页请关注）")
+                                message=f"[轮询·跳过] {who} 分页指令「{_content}」在整段重扫时被判已处理，已跳过（如属漏翻页请关注）")
                             continue
                         seen[key] = _t
                         # 非管理员聊天里「我方自回」消息（attr=self）直接跳过，
