@@ -99,12 +99,18 @@ class _WxSendRecorder:
     - 发送成功后回调 on_sent(who)，把该聊天的消息全部标记为已读，进一步兜底。
     """
 
+    # 切窗后的等待时长（秒）。wxauto4 的 ChatWith 是「点击会话」的异步切窗，
+    # 文档明确其无返回值、不等待。实测 0.4s 足以覆盖绝大多数机器的渲染耗时。
+    SWITCH_WAIT = 0.4
+
     def __init__(self, real):
         object.__setattr__(self, '_real', real)
         object.__setattr__(self, 'lock', threading.RLock())
         object.__setattr__(self, '_rlock', threading.Lock())
         object.__setattr__(self, '_recent', {})
         object.__setattr__(self, 'on_sent', None)
+        # 当前微信停留在哪个聊天窗口（仅用于诊断，发送路径不依赖它做跳过判断）
+        object.__setattr__(self, '_cur_win', None)
 
     def __getattr__(self, name):
         return getattr(self._real, name)
@@ -132,11 +138,33 @@ class _WxSendRecorder:
                     self._real.ChatWith(who)
                 except Exception:
                     pass
+                # ⚠️ 必须等切换「真正渲染完成」再输入内容 —— 这是「回复错群」的根因。
+                #
+                # ChatWith 只是发出一次「点击会话」的 UI 动作，不等待窗口切换完成
+                # （官方文档签名 ChatWith(who, exact=False)，无返回值、无等待语义）。
+                # 点击已发出、但界面还停在上一个聊天时，后续的输入+回车会打到
+                # 上一个窗口 —— 客户反馈的「A 群发的搜索指令，回复到了 B 群」
+                # 正是这么来的。read_messages 里早就有这个 sleep，唯独发送路径漏了。
+                #
+                # 注意：绝不能为了"提速"在这里用 _cur_win 跳过切窗。跳过能省 0.4s，
+                # 但一旦窗口状态判断失误，消息就会发错人 —— 发错的代价远大于 0.4s。
+                time.sleep(self.SWITCH_WAIT)
+                object.__setattr__(self, '_cur_win', who)
             result = self._real.SendMsg(msg=msg, who=who, *a, **k)
         cb = self.on_sent
         if cb is not None and who:
+            # ⚠️ 必须异步：on_sent（_mark_chat_seen）会切窗 + 读整个消息列表，
+            # 是一段约 1 秒的 UI 自动化。同步调用会把发送线程死死卡住 ——
+            # 而发送队列是串行的，一次卡 1 秒意味着后面所有群的所有回复都跟着
+            # 顺延 1 秒。群多、回复频繁时，"处理慢"有相当一部分来自这里。
+            def _run_cb(_cb, _who):
+                try:
+                    _cb(_who)
+                except Exception:
+                    pass
             try:
-                cb(who)
+                threading.Thread(target=_run_cb, args=(cb, who),
+                                 name="onsent", daemon=True).start()
             except Exception:
                 pass
         return result
@@ -163,7 +191,8 @@ class _WxSendRecorder:
                 except Exception:
                     pass
                 # 等待微信窗口切换/渲染完成（参考 wxauto4 force_wait=0.5 的经验值）
-                time.sleep(0.4)
+                time.sleep(self.SWITCH_WAIT)
+                object.__setattr__(self, '_cur_win', who)
                 try:
                     msgs = self._real.GetAllMessage()
                 except Exception:
@@ -2662,8 +2691,23 @@ class WXBot:
         # 取代旧的「条数游标 + 内容指纹游标」组合（详见 _poll_loop 注释）。
         self._poll_prev_seq = {}
         self._poll_targets = []
-        self._poll_interval = 1.5     # 轮询间隔（秒），后续可在面板开放配置
+        self._poll_interval = 0.8     # 轮询间隔（秒），后续可在面板开放配置
         self._poll_seen_max = self.POLL_SEEN_MAX
+        # 已建立「启动基线」的聊天集合。
+        # 只有真正读到过该聊天窗口、把历史消息全部标记为已读，才算建立基线。
+        # 未建立基线的聊天，首轮读到时**只建基线、不处理任何消息** ——
+        # 否则启动瞬间（微信未就绪 / 群名匹配失败 / 切窗竞态）读不到、
+        # seen 为空，第一轮就会把窗口里的历史消息当新消息全部重放，
+        # 这就是客户说的「昨天的指令，今天回复到其他群」。
+        self._poll_baselined = set()
+        # 自适应调度：记录每个聊天最近一次【有消息被处理】的时间。
+        # 轮询是串行的 UI 自动化，N 个群一轮就要 N×~1s；没人说话的群每轮都查
+        # 纯属浪费，会把活跃群的消息延迟拖到十几秒。冷群降频、热群每轮查。
+        self._poll_last_active = {}
+        self._poll_round = 0
+        # 发送后重对齐（_mark_chat_seen）的节流时间戳，见该方法注释
+        self._mark_last_ts = {}
+        self.MARK_THROTTLE = 3.0    # 同一聊天 3 秒内只做一次窗口重对齐
 
         cmd = self.config.cmd
         if cmd:
@@ -2715,11 +2759,23 @@ class WXBot:
                 if msgs:
                     break
                 time.sleep(0.8)
+            if not msgs:
+                # 读到空：绝不建立基线，也绝不写空序列。
+                # 写空序列 = 告诉轮询「上轮是空的」→ 首轮 t=0 整段重扫 →
+                # seen 此时也是空的 → 历史消息全部重放。
+                log(level="WARNING",
+                    message=f"[轮询] 启动基线失败：{who} 连续 3 次读到 0 条，"
+                            f"将在首轮读到时整段标记为已读（不回放历史）")
+                continue
             seen = self._poll_seen.setdefault(who, {})
             for m in msgs:
                 seen[self._msg_key(m, who)] = _t
             # 记录初始序列：之后每轮都与它做前后缀对齐，已存在的消息不会被重放
             self._poll_prev_seq[who] = [self._msg_key(m, who) for m in msgs]
+            self._poll_baselined.add(who)
+            # 启动后先按「活跃」对待，保证刚上线的群每轮都查；
+            # 一段时间没消息后自动转冷、降频（见 _should_poll）。
+            self._poll_last_active[who] = time.time()
 
     @staticmethod
     def _msg_key(m, who=None):
@@ -2769,6 +2825,14 @@ class WXBot:
         """
         if who not in [t[0] for t in self._poll_targets]:
             return
+        # 节流：机器人的一次回复往往是「正在搜索…」+ 结果 + 拆分后的多条消息，
+        # 每条都会触发本回调。而本回调要切窗 + 读整个消息列表（约 1 秒的 UI
+        # 自动化，还要和轮询线程抢同一把窗口锁）—— 连着做三五次纯属浪费，
+        # 会把所有群的回复都拖慢。同一聊天 MARK_THROTTLE 秒内只做一次。
+        _now = time.time()
+        if _now - self._mark_last_ts.get(who, 0) < self.MARK_THROTTLE:
+            return
+        self._mark_last_ts[who] = _now
         try:
             msgs = self.wx.read_messages(who)
             # 发送后立刻把序列对齐到「含本次回复」的真实状态：
@@ -2785,6 +2849,30 @@ class WXBot:
         except Exception:
             pass
 
+    # 自适应轮询参数：冷聊天降频，避免活跃群被"陪跑"拖慢
+    POLL_HOT_SEC = 90      # 最近 90 秒内有消息被处理 → 视为活跃，每轮都查
+    POLL_COLD_EVERY = 3    # 冷聊天每 3 轮查一次
+
+    def _should_poll(self, who, idx, rnd):
+        """本轮是否需要轮询该聊天。
+
+        轮询是串行的 UI 自动化：每个聊天都要「切窗 + 等渲染 + 读消息列表 +
+        滚到底部」，单次约 1 秒。10 个群全查一轮就是 10 秒出头，活跃群的消息
+        平均要等半个轮次才被发现、最坏等满一轮 —— 这就是客户说的「接收消息
+        处理消息比较慢」。而实际上大部分群大部分时间根本没人说话。
+
+        因此分三档：
+          - 未建立启动基线的：每轮都查（尽快完成基线，避免历史消息堆着被误放）
+          - 最近有消息的（热）：每轮都查
+          - 长期没消息的（冷）：每 POLL_COLD_EVERY 轮查一次
+        冷聊天按其在监听列表中的序号错开，避免它们挤在同一轮一起拖慢一轮的耗时。
+        """
+        if who not in self._poll_baselined:
+            return True
+        if time.time() - self._poll_last_active.get(who, 0) < self.POLL_HOT_SEC:
+            return True
+        return (rnd + idx) % self.POLL_COLD_EVERY == 0
+
     def _poll_loop(self):
         try:
             import pythoncom
@@ -2796,9 +2884,13 @@ class WXBot:
             try:
                 _t = _now()
                 _max = self._poll_seen_max
-                for who, chat_type in self._poll_targets:
+                self._poll_round += 1
+                _rnd = self._poll_round
+                for _ti, (who, chat_type) in enumerate(self._poll_targets):
                     if self._poll_stop.is_set():
                         break
+                    if not self._should_poll(who, _ti, _rnd):
+                        continue
                     msgs = self.wx.read_messages(who)
                     n = len(msgs)
                     # 空读保护：切窗失败/窗口未渲染完成时 GetAllMessage 会返回空列表。
@@ -2810,12 +2902,26 @@ class WXBot:
                             message=f"[轮询] {who} 读取 0 条（切窗可能未就绪），跳过本轮、序列保持不变")
                         continue
                     seen = self._poll_seen.setdefault(who, {})
+                    cur_seq = [self._msg_key(m, who) for m in msgs]
+                    # ============ 启动基线：首次读到只标记、不处理 ============
+                    # 启动时若微信未就绪/群名匹配失败/切窗竞态，_seed_poll_seen 会读到空，
+                    # 此时 seen 与序列都是空的。若不设这道闸，第一轮就会把窗口里
+                    # 的全部历史消息当成"新消息"重放 —— 客户反馈的
+                    # 「昨天的指令，今天回复到其他群」就是这么产生的。
+                    if who not in self._poll_baselined:
+                        for _k in cur_seq:
+                            seen[_k] = _t
+                        self._poll_prev_seq[who] = cur_seq
+                        self._poll_baselined.add(who)
+                        self._poll_last_active[who] = _t
+                        log(message=f"[轮询] {who} 建立启动基线：{n} 条历史消息"
+                                    f"标记为已读，不回放")
+                        continue
                     # ============ 单点定位：序列前后缀对齐 ============
                     # 与上轮窗口序列做对齐，找出本轮真正新增的消息。
                     # 这取代了旧的「条数游标 + 内容指纹游标 + is_page 豁免 + _is_last 豁免
                     # + 尾部兜底」四层补丁 —— 那套东西存在的唯一理由就是内容键会撞，
                     # 而位置对齐根本不看内容，连续 N 次「下一页」天然是 N 条不同的消息。
-                    cur_seq = [self._msg_key(m, who) for m in msgs]
                     prev_seq = self._poll_prev_seq.get(who, [])
                     t = self._seq_overlap(prev_seq, cur_seq)
                     aligned = t > 0
@@ -2874,6 +2980,9 @@ class WXBot:
                         _lsum = "?"
                     # 对齐信息一并打印：t 为「与上轮重叠的条数」，新增 = n - t。
                     # 若连续多轮 t=0，说明窗口读取不稳定（切窗竞态），是漏消息的前兆。
+                    if _new_cnt:
+                        # 有消息在流动 → 标记为活跃，后续每轮都查（见 _should_poll）
+                        self._poll_last_active[who] = _t
                     log(message=f"[轮询] {who} 读取 {n} 条 | 与上轮对齐 {t} 条"
                                f"{'（整段重扫）' if not aligned else ''}"
                                f" | 最新「{_lsum}」 | 本轮新处理 {_new_cnt} 条")

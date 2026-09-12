@@ -49,12 +49,19 @@ def seq_overlap(prev, cur):
 class PollSim:
     """忠实复刻 wxbot_core._poll_loop 的核心判定逻辑（纯内存，不依赖 wxauto）。"""
 
+    # 自适应轮询参数（与 wxbot_core.WXBot 保持一致）
+    POLL_HOT_SEC = 90
+    POLL_COLD_EVERY = 3
+
     def __init__(self, cmd="文件传输助手"):
         self.config_cmd = cmd
         self.poll_seen = {}       # who -> {key: ts}
         self.poll_prev_seq = {}   # who -> 上轮窗口的消息键序列
         self.handled = []         # (who, content) 处理记录
         self.aligned_log = []     # 每轮是否对齐成功
+        self.baselined = set()    # 已建立启动基线的聊天
+        self.last_active = {}     # who -> 最近一次有消息被处理的时间
+        self.now = 0.0            # 模拟时钟
 
     # ---- 对应 wxbot_core._mark_chat_seen ----
     def mark_chat_seen(self, who, msgs):
@@ -68,10 +75,25 @@ class PollSim:
             self.poll_prev_seq[who] = [msg_key(m, who) for m in msgs]
 
     def seed(self, who, msgs):
+        if not msgs:
+            # 读到空：绝不建立基线、绝不写空序列（对应 wxbot_core._seed_poll_seen
+            # 的失败分支）。写空序列会让首轮 t=0 整段重扫，而 seen 也是空的 →
+            # 历史消息全部重放。
+            return
         seen = self.poll_seen.setdefault(who, {})
         for m in msgs:
             seen[msg_key(m, who)] = 0.0
         self.poll_prev_seq[who] = [msg_key(m, who) for m in msgs]
+        self.baselined.add(who)
+        self.last_active[who] = self.now
+
+    def should_poll(self, who, idx, rnd):
+        """对应 wxbot_core.WXBot._should_poll：冷聊天降频、热聊天每轮查。"""
+        if who not in self.baselined:
+            return True
+        if self.now - self.last_active.get(who, 0) < self.POLL_HOT_SEC:
+            return True
+        return (rnd + idx) % self.POLL_COLD_EVERY == 0
 
     def poll_once(self, who, msgs):
         """模拟 _poll_loop 单轮对单个 who 的处理。"""
@@ -80,6 +102,15 @@ class PollSim:
             return []                       # 空读保护：不动序列
         seen = self.poll_seen.setdefault(who, {})
         cur_seq = [msg_key(m, who) for m in msgs]
+        # 启动基线：首次读到该聊天时只标记、不处理 —— 防止历史消息被当成新消息重放
+        if who not in self.baselined:
+            for k in cur_seq:
+                seen[k] = 0.0
+            self.poll_prev_seq[who] = cur_seq
+            self.baselined.add(who)
+            self.last_active[who] = self.now
+            self.aligned_log.append(True)
+            return []
         prev_seq = self.poll_prev_seq.get(who, [])
         t = seq_overlap(prev_seq, cur_seq)
         aligned = t > 0
@@ -104,6 +135,8 @@ class PollSim:
                 continue                     # 简化：recent_self 为空
             out.append(content)
             self.handled.append((who, content))
+        if out:
+            self.last_active[who] = self.now      # 有消息流动 → 标记为活跃
         self.poll_prev_seq[who] = cur_seq
         return out
 
@@ -264,5 +297,46 @@ got = sim.poll_once("Silence", hist + [_Msg('system', 'system', 'other', 'xxx �
                                        _Msg('time', 'time', 'time', '2026-09-10 18:00:00')])
 assert got == [], f"场景13 失败（系统/时间消息不应触发）: {got}"
 print("场景13 系统/时间消息不触发处理 OK")
+
+# ---- 场景 14：启动 seed 读到 0 条（微信未就绪）→ 首轮只建基线，绝不回放历史 ----
+# 对应客户反馈「昨天的指令，今天回复到其他群」：启动时读不到 → seen 为空 →
+# 首轮 t=0 整段重扫 → 窗口里的历史消息被当成新指令全部执行一遍。
+sim = PollSim()
+sim.seed("Silence", [])                       # 启动未就绪，3 次重试都读到空
+assert "Silence" not in sim.baselined, "场景14a 失败：读到空不应建立基线"
+assert sim.poll_prev_seq.get("Silence") is None, "场景14b 失败：读到空不应写空序列"
+history = [fr("Silence", "昨天的旧指令1"), fr("Silence", "昨天的旧指令2"), NX()]
+got = sim.poll_once("Silence", history)       # 首轮终于读到
+assert got == [], f"场景14c 失败（历史消息不应被回放）: {got}"
+assert "Silence" in sim.baselined, "场景14d 失败：首轮应建立基线"
+got = sim.poll_once("Silence", history + [fr("Silence", "搜索 刘德华")])
+assert got == ["搜索 刘德华"], f"场景14e 失败（基线之后的新消息应正常处理）: {got}"
+print("场景14 seed 读到空时不建基线，首轮只标记历史、不回放 OK")
+
+# ---- 场景 15：自适应降频 —— 热群每轮查、冷群降频且互相错开 ----
+sim = PollSim()
+groups = ["群A", "群B", "群C", "群D"]
+for g in groups:
+    sim.seed(g, [fr("x", "旧消息")])
+sim.now = 1000.0
+for g in groups:
+    sim.last_active[g] = 0.0                  # 全部设为「很久没消息」= 冷
+sim.last_active["群A"] = 999.0                # 群A 刚有消息 = 热
+checked = {r: [g for i, g in enumerate(groups) if sim.should_poll(g, i, r)]
+           for r in range(1, 7)}
+for r in range(1, 7):
+    assert "群A" in checked[r], f"场景15a 失败：热群第 {r} 轮应每轮都查"
+cold_hits = {g: sum(1 for r in range(1, 7) if g in checked[r])
+             for g in groups[1:]}
+assert all(1 <= v <= 3 for v in cold_hits.values()), \
+    f"场景15b 失败：冷群 6 轮内应查 2~3 次，实际 {cold_hits}"
+# 冷群必须错开：任意一轮都不该把三个冷群全查了（否则那一轮会特别慢）
+assert all(len([g for g in checked[r] if g != "群A"]) <= 2 for r in range(1, 7)), \
+    f"场景15c 失败：冷群未错开，单轮冷群数过多 {checked}"
+# 冷群突然来消息 → 立即转热
+sim.poll_once("群D", [fr("x", "旧消息"), fr("x", "新指令")])
+assert all(sim.should_poll("群D", 3, r) for r in range(1, 7)), \
+    "场景15d 失败：冷群有消息后应立即转热、每轮都查"
+print(f"场景15 自适应降频 OK（6 轮：热群 6 次 / 冷群 {cold_hits}）")
 
 print("\n全部回归场景通过 ✅")

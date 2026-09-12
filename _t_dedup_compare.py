@@ -266,7 +266,7 @@ class C:
 
 
 # ================= 场景 =================
-def run(title, builds, script, expect):
+def run(title, builds, script, expect, verbose=True):
     """script: [(本轮窗口, 机器人是否在本轮处理后发送, 发送后读到的窗口)] -> {方案: 处理结果列表}"""
     print(f"\n{'='*78}\n{title}\n{'='*78}")
     res = {}

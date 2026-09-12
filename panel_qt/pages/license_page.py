@@ -216,11 +216,20 @@ def build(page, mw):
             from core import wx_compat
             ok, msg = wx_compat.activate_plus(code)
             if ok:
+                # 关键：CORE 是模块级一次性计算的，不重算的话面板会一直显示
+                # 「免费版」，客户就会以为"激活没生效"。这里立即重算并刷新。
+                try:
+                    wx_compat.reload_core()
+                except Exception as e:
+                    mw.log(f"内核状态刷新失败：{e}", "WARNING")
                 mw.log(f"wxautox4 激活成功：{msg}", "SUCCESS")
-                info(mw, "激活成功", str(msg))
+                refresh_core()
+                info(mw, "激活成功",
+                     "%s\n\n内核已切换到 Plus 版。为保证多群回调监听等功能"
+                     "完全生效，请重启软件一次。" % msg)
             else:
                 warn(mw, "激活失败", str(msg))
-            refresh_core()
+                refresh_core()
         except Exception as e:
             warn(mw, "激活失败", str(e))
 
