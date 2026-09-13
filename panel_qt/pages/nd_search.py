@@ -179,6 +179,14 @@ def build(page, mw):
     e_ad.setFixedHeight(64)
     g4l.addWidget(ad_lbl, 2, 0, alignment=Qt.AlignTop)
     g4l.addWidget(e_ad, 2, 1, 1, 4)
+
+    ck_req_pan = QPushButton("指令必须指定网盘类型")
+    ck_req_pan.setCheckable(True)
+    ck_req_pan.setFixedHeight(30)
+    ck_req_pan.setMinimumWidth(160)
+    ck_req_pan.setToolTip("开启后，用户发「搜索 关键词」不带网盘类型时，"
+                          "会提示先选类型，而不是直接返回混合结果。")
+    g4l.addWidget(ck_req_pan, 3, 0, 1, 2)
     g4l.setColumnStretch(4, 1)
     lay.addWidget(g4)
 
@@ -208,6 +216,7 @@ def build(page, mw):
         sp_max.setValue(int(s.get("max_results", 60) or 60))
         sp_ttl.setValue(int(s.get("session_ttl", 300) or 300))
         e_ad.setPlainText(str(s.get("ad_words", "") or ""))
+        ck_req_pan.setChecked(bool(s.get("require_pan_type", False)))
 
     def collect():
         if CM is None:
@@ -235,6 +244,7 @@ def build(page, mw):
             "session_ttl": sp_ttl.value(),
             "ad_words": e_ad.toPlainText().strip(),
             "default_types": sel,
+            "require_pan_type": ck_req_pan.isChecked(),
         }
         CM.save_config(c)
         return {}

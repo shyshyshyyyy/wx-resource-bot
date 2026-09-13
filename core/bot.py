@@ -198,6 +198,12 @@ class Bot:
         if not keyword:
             return self.reply(chat, self.t("search_hint"), sender, is_group)
 
+        # 可选：要求指令必须带网盘类型（面板「结果展示」里的开关）。
+        # 开启后，未带类型的搜索会提示用户先选类型，而不是返回混合结果。
+        if not pan and (self.cfg.get("search", {}) or {}).get("require_pan_type"):
+            return self.reply(chat, self.t("require_pan_hint", keyword=keyword),
+                              sender, is_group)
+
         pan_name = sess.PAN_DISPLAY.get(pan, "全部网盘")
         self.reply(chat, self.t("searching", keyword=keyword, pan_name=pan_name),
                    sender, is_group)

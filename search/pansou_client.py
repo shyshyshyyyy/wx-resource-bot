@@ -40,6 +40,11 @@ _DOMAIN_HINTS = [
     (r"mypikpak\.com", "pikpak"),
 ]
 
+# 永不展示的网盘类型：磁力(magnet)/电驴(ed2k) 含大量不健康内容，
+# 且不属于网盘，无论是否显式勾选都应从搜索结果中剔除（双层保险：
+# 即使误配进 default_types，这里也拦下）。
+BLOCKED_PAN_TYPES = frozenset({"magnet", "ed2k"})
+
 
 def _sniff_type(url, declared=""):
     """优先看链接域名，取不到再用 pansou 声明的类型。"""
@@ -172,7 +177,12 @@ class PansouClient:
     def search(self, keyword, pan=None, refresh=False):
         """
         返回 (results, errors)。
-        pan 不为空时只保留该类型；否则按 default_types 的顺序排。
+
+        - pan 不为空：只保留该类型（尊重用户的显式指定）；
+        - pan 为空（指令没带网盘类型）：只保留「面板启用的网盘类型」
+          (search.default_types)，并强制剔除 magnet / ed2k 等非网盘类型。
+          这样就保证「面板只勾了夸克/百度」时，结果里绝不会冒出磁力链接——
+          之前这里只排序不裁剪，未启用的类型（尤其磁力）会被一并返回。
         """
         s = self.cfg.get("search", {})
         mode = s.get("mode", "local")
@@ -210,6 +220,16 @@ class PansouClient:
         if pan:
             items = [i for i in items if i.get("pan") == pan]
         else:
+            # 指令未带网盘类型：只保留面板启用的类型，剔除磁力/电驴等。
+            enabled = set(s.get("default_types") or [])
+            blocked = BLOCKED_PAN_TYPES
+            if enabled:
+                items = [i for i in items
+                         if i.get("pan") in enabled and i.get("pan") not in blocked]
+            else:
+                # default_types 为空（异常/防御）：至少剔除明确不要的非网盘类型
+                items = [i for i in items if i.get("pan") not in blocked]
+            # 按启用顺序排序（未命中的已在上一步过滤掉）
             order = s.get("default_types") or []
             rank = {t: i for i, t in enumerate(order)}
             items.sort(key=lambda i: rank.get(i.get("pan"), 99))

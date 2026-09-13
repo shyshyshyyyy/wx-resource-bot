@@ -64,6 +64,9 @@ DEFAULT_CONFIG = {
         # 用户选定的 7 种网盘。与盘搜接口 cloud_types 对齐；
         # 转存引擎有对应适配器才能真正转存，否则回落原链（见 transfer.fallback_original_link）
         "default_types": ["quark", "baidu", "uc", "aliyun", "xunlei", "guangya", "mobile"],
+        # 指令必须带网盘类型：开启后，「搜索 关键词」不带类型会提示先选类型，
+        # 而不是返回混合结果（含未启用的类型）。默认关，保留旧行为。
+        "require_pan_type": False,
     },
 
     "transfer": {
@@ -83,6 +86,8 @@ DEFAULT_CONFIG = {
         "search_hint": "",
         "searching": "🔍 正在为您搜索「{keyword}」…",
         "no_result": "没有找到「{keyword}」相关的资源，换个关键词试试～",
+        # 开启「指令必须指定网盘类型」后，未带类型的搜索指令会收到这条提示
+        "require_pan_hint": "请先指定网盘类型再搜索，例如：\n搜索 {keyword} 夸克\n搜索 {keyword} 百度",
         "result_header": "🔍 为您找到 {total} 条「{keyword}」资源（第 {page}/{pages} 页）",
         # 彩球(pan_icon) + 彩色序号(index_emoji) + 标题；不再展示 pansou 插件(source)
         "result_item": "{pan_icon} {index_emoji}. {dead_mark}{title} 〔{pan_name}〕",
