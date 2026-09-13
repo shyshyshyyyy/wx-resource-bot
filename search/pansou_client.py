@@ -9,6 +9,7 @@ pansou 的 /api/search 返回 merged_by_type：按网盘类型分组的链接列
 import re
 import logging
 import hashlib
+import datetime as _dt
 import concurrent.futures as futures
 
 import requests
@@ -44,6 +45,38 @@ _DOMAIN_HINTS = [
 # 且不属于网盘，无论是否显式勾选都应从搜索结果中剔除（双层保险：
 # 即使误配进 default_types，这里也拦下）。
 BLOCKED_PAN_TYPES = frozenset({"magnet", "ed2k"})
+
+
+def _parse_time(val):
+    """把 pansou 的 datetime 解析成可排序的 epoch 秒；解析失败返回 0（视为最旧）。
+
+    pansou 实测格式：
+      - ISO8601 带时区：2026-09-13T10:32:39.094362335+08:00
+      - 无日期哨兵：    0001-01-01T00:00:00Z（解析后视为最旧，排到最后）
+      - 纯数字 Unix 时间戳（秒或毫秒）
+    """
+    if not val:
+        return 0.0
+    s = str(val).strip()
+    if not s:
+        return 0.0
+    # 纯数字：Unix 时间戳（秒，或毫秒）
+    if s.isdigit():
+        n = int(s)
+        return n / 1000.0 if n > 1e12 else float(n)
+    # ISO8601：先把尾部 Z 换成 +00:00（fromisoformat 兼容写法）
+    iso = s[:-1] + "+00:00" if s.endswith("Z") else s
+    try:
+        return _dt.datetime.fromisoformat(iso).timestamp()
+    except Exception:
+        pass
+    # 兜底常见格式
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d"):
+        try:
+            return _dt.datetime.strptime(s, fmt).timestamp()
+        except Exception:
+            continue
+    return 0.0
 
 
 def _sniff_type(url, declared=""):
@@ -217,11 +250,20 @@ class PansouClient:
 
         items = _dedup(items)
 
+        # 排序键：主排序按时间倒序（最新分享链接在前），同时间再按启用类型顺序排列。
+        # pansou 的 datetime 多为 ISO8601（如 2026-09-13T10:32:39+08:00），
+        # 也有 '0001-01-01T00:00:00Z' 这类「无日期」哨兵值（解析后视为最旧，排末尾）。
+        order = s.get("default_types") or []
+        rank = {t: i for i, t in enumerate(order)}
+
+        def _sort_key(i):
+            return (-_parse_time(i.get("datetime", "")), rank.get(i.get("pan"), 99))
+
         if pan:
             items = [i for i in items if i.get("pan") == pan]
         else:
             # 指令未带网盘类型：只保留面板启用的类型，剔除磁力/电驴等。
-            enabled = set(s.get("default_types") or [])
+            enabled = set(order)
             blocked = BLOCKED_PAN_TYPES
             if enabled:
                 items = [i for i in items
@@ -229,10 +271,8 @@ class PansouClient:
             else:
                 # default_types 为空（异常/防御）：至少剔除明确不要的非网盘类型
                 items = [i for i in items if i.get("pan") not in blocked]
-            # 按启用顺序排序（未命中的已在上一步过滤掉）
-            order = s.get("default_types") or []
-            rank = {t: i for i, t in enumerate(order)}
-            items.sort(key=lambda i: rank.get(i.get("pan"), 99))
+        # 统一按时间倒序（最新在前）；未指定类型时已先按启用类型裁剪
+        items.sort(key=_sort_key)
 
         limit = int(s.get("max_results", 60))
         return items[:limit], errors
