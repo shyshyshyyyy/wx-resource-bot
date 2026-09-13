@@ -73,7 +73,7 @@ for mod in ('core', 'transfer', 'search', 'panel_qt', 'panel_qt.pages'):
 
 # 包体资源（二进制 / 数据文件）
 for pkg in ('wxauto4', 'cryptography', 'PIL', 'schedule', 'psutil', 'pyperclip',
-            'httpx', 'httpcore', 'anyio', 'h11', 'sniffio'):
+            'httpx', 'httpcore', 'anyio', 'h11', 'sniffio', 'sounddevice'):
     try:
         d, b, h = collect_all(pkg)
         datas += d

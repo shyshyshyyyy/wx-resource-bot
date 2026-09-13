@@ -550,3 +550,40 @@ __all__ = ["WeChat", "WxParam", "msgs", "check_license", "CORE",
 log.info("微信内核: %s (%s)", CORE_LABEL, CORE_DETAIL)
 if _SAVED_OK:
     log.info("wxautox4 授权: %s", _SAVED_DETAIL)
+
+
+def _startup_diagnostic():
+    """启动诊断：客户回传日志时，这一整块能直接定位「为什么是免费版」。
+
+    只在非 Plus 时打印（Plus 无需诊断）。
+    """
+    if CORE == CORE_PLUS:
+        return
+    lines = ["[内核诊断] 当前为免费版，原因如下："]
+    # 1) 付费内核本身能不能 import
+    try:
+        import wxautox4  # noqa: F401
+        lines.append("  1) wxautox4 内核可加载: 是")
+    except Exception as e:
+        lines.append("  1) wxautox4 内核可加载: 否 -> %s" % e)
+        lines.append("     （打包漏了付费内核，需重新打包）")
+    # 2) 授权文件是否恢复
+    dat = plus_license_dat()
+    if dat and _os.path.exists(dat):
+        lines.append("  2) 已保存授权文件 data/wxautox_license.dat: 存在")
+    else:
+        lines.append("  2) 已保存授权文件 data/wxautox_license.dat: 不存在")
+    # 3) 授权码是否保存
+    code_path = plus_license_code_file()
+    if code_path and _os.path.exists(code_path):
+        lines.append("  3) 已保存授权码 data/wxautox_code.txt: 存在（重启时会用码重新激活，需联网）")
+    else:
+        lines.append("  3) 已保存授权码 data/wxautox_code.txt: 不存在（从未成功激活/未持久化）")
+    lines.append("  4) 内核探测结论: %s" % CORE_DETAIL)
+    lines.append("  >> 若为 2/3 都不存在：客户需先在面板「激活」页用授权码激活一次；")
+    lines.append("  >> 若 3 存在但仍免费：重启时无网络导致授权码激活失败，需联网后重启。")
+    for ln in lines:
+        log.warning(ln)
+
+
+_startup_diagnostic()
