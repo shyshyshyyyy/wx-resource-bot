@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 from . import register
 from core import paths
 
-VERSION = "1.0.0"
-BUILD = "2026-09-09"
+VERSION = "1.2.4"
+BUILD = "2026-09-14"
 
 
 def _kv(label, value):

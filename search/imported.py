@@ -23,6 +23,7 @@ import csv
 import json
 import logging
 import threading
+from datetime import datetime
 
 log = logging.getLogger("imported")
 
@@ -125,16 +126,56 @@ def _json_path():
     return os.path.join(paths.data_dir(), "imported.json")
 
 
-def load_imported():
+def _now_iso():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _save_datasets(datasets):
+    """原子写回数据集列表（多文件，每个文件一个数据集）。"""
+    p = _json_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(datasets, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, p)
+
+
+def load_datasets():
+    """读取全部导入数据集（按文件分组）。
+
+    兼容旧版：若 imported.json 是扁平 item 列表（v1.2.3 之前），
+    自动包装成单个遗留数据集，避免老数据读不出来。
+    返回：[{source, name, imported_at, count, items:[...]}, ...]
+    """
     p = _json_path()
     if not os.path.exists(p):
         return []
     try:
         with open(p, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, list) else []
     except Exception:
         return []
+    if not isinstance(data, list):
+        return []
+    # 新格式：每个元素是含 items 键的数据集
+    if data and isinstance(data[0], dict) and "items" in data[0]:
+        return data
+    # 旧格式兼容：扁平 item 列表 -> 包装成单个遗留数据集
+    return [{
+        "source": "",
+        "name": "（旧版导入数据）",
+        "imported_at": "",
+        "count": len(data),
+        "items": data,
+    }]
+
+
+def load_imported():
+    """返回所有导入数据集里展平后的 item 列表（供搜索 / 计数使用）。"""
+    items = []
+    for ds in load_datasets():
+        items.extend(ds.get("items", []) or [])
+    return items
 
 
 def clear_imported():
@@ -149,28 +190,23 @@ def clear_imported():
 
 
 def count_imported():
-    return len(load_imported())
+    return sum(len(ds.get("items", []) or []) for ds in load_datasets())
 
 
 def import_table(path):
-    """解析表格并写入 data/imported.json（覆盖式：重新导入即替换旧数据）。
+    """解析表格并写入 data/imported.json（多文件模型）。
 
-    返回 (count, errors)。
-      count  ：成功导入的条数（含 own 与 非 own）
+    - 同一文件路径重复导入 => 替换该文件的数据集（编辑后重导不会翻倍）；
+    - 不同文件路径导入     => 追加为新数据集（多个表格共存，互不清除）。
+
+    返回 (count, errors)：
+      count  ：本文件成功导入的条数
       errors ：每条解析失败的说明（行号 + 原因）
     """
     headers, rows = _read_rows(path)
     if not headers:
         return 0, ["表格为空或无法解析表头"]
 
-    # 建立 字段 -> 列下标 的映射
-    col = {}
-    for idx, h in enumerate(headers):
-        fld = _match_header(h, None)
-        if fld and fld not in col:
-            col[fld] = idx
-    # 用 header 名直接做字典的话上面 _read_rows 已经 zip 成 dict，
-    # 这里改用 dict 行 + 列名匹配更稳妥：
     def _cell(row, fld):
         # row 是 header->value 的字典；再按 hint 找具体 key
         for h, v in row.items():
@@ -199,16 +235,41 @@ def import_table(path):
             "origin": "imported",
         }))
 
-    # 覆盖写入
-    p = _json_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump([dict(r) for r in out], f, ensure_ascii=False, indent=2)
-    os.replace(tmp, p)
-    log.info("导入本地资源：%d 条（own=%d），来自 %s",
-             len(out), sum(1 for r in out if r.get("own")), path)
+    # 多文件：按来源绝对路径定位数据集，重复导入同文件则替换，否则追加
+    key = os.path.abspath(path)
+    datasets = load_datasets()
+    new_ds = {
+        "source": key,
+        "name": os.path.basename(path),
+        "imported_at": _now_iso(),
+        "count": len(out),
+        "items": [dict(r) for r in out],
+    }
+    replaced = False
+    for idx, ds in enumerate(datasets):
+        if os.path.abspath(ds.get("source", "")) == key:
+            datasets[idx] = new_ds
+            replaced = True
+            break
+    if not replaced:
+        datasets.append(new_ds)
+    _save_datasets(datasets)
+    log.info("导入本地资源：%d 条（own=%d），来自 %s（数据集共 %d 个）",
+             len(out), sum(1 for r in out if r.get("own")), path, len(datasets))
     return len(out), errors
+
+
+def remove_imported(source):
+    """按来源文件路径移除某一个数据集（单独移除某个表格）。返回移除的个数。"""
+    key = os.path.abspath(source)
+    datasets = load_datasets()
+    before = len(datasets)
+    datasets = [d for d in datasets
+                if os.path.abspath(d.get("source", "")) != key]
+    if len(datasets) == before:
+        return 0
+    _save_datasets(datasets)
+    return before - len(datasets)
 
 
 def search_imported(keyword, pan=None):

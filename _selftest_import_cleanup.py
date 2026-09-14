@@ -49,14 +49,35 @@ check("search_imported pan 过滤", len(r2) == 1 and r2[0]["title"] == "电影B"
 r3 = IMP.search_imported("不存在")
 check("search_imported 无命中=0", len(r3) == 0)
 
-# ---------- 3. csv 导入覆盖 ----------
+# ---------- 3. 多文件合并 / 同名替换 / 单独移除 ----------
 csvp = os.path.join(TMP, "res.csv")
 with open(csvp, "w", encoding="utf-8-sig", newline="") as f:
     f.write("title,url,own\n")
     f.write("剧集X,https://pan.xunlei.com/s/xxx,TRUE\n")     # 列对齐
 cnt2, _ = IMP.import_table(csvp)
-check("csv 覆盖导入=1", cnt2 == 1)
-check("csv own=TRUE 识别", IMP.load_imported()[0].get("own") is True)
+# 关键：导入第二个文件不应清除第一个（客户反馈的 bug）
+check("多文件共存：xlsx(3)+csv(1)=4", IMP.count_imported() == 4)
+check("csv own=TRUE 识别", any(i.get("own") is True and i["title"] == "剧集X"
+                               for i in IMP.load_imported()))
+check("数据集个数=2", len(IMP.load_datasets()) == 2)
+
+# 同一文件再次导入 => 替换（不翻倍）
+cnt2b, _ = IMP.import_table(csvp)
+check("同名重导替换不翻倍=4", IMP.count_imported() == 4)
+check("同名重导后数据集仍=2", len(IMP.load_datasets()) == 2)
+
+# 单独移除 csv 数据集
+removed = IMP.remove_imported(csvp)
+check("remove_imported 移除1个", removed == 1)
+check("移除后总数回到3", IMP.count_imported() == 3)
+check("移除后数据集=1", len(IMP.load_datasets()) == 1)
+
+# 旧版扁平格式兼容（v1.2.3 之前是 item 列表，不是数据集列表）
+with open(os.path.join(TMP, "imported.json"), "w", encoding="utf-8") as f:
+    json.dump([{"title": "老数据", "url": "https://x", "pan": "", "own": False,
+                "source": "本地导入", "datetime": "", "size": "", "origin": "imported"}],
+              f, ensure_ascii=False)
+check("旧版扁平格式可读取", any(i["title"] == "老数据" for i in IMP.load_imported()))
 
 IMP.clear_imported()
 check("clear_imported 后=0", IMP.count_imported() == 0)
