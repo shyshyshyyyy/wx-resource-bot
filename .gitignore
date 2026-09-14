@@ -22,6 +22,9 @@ dist/
 *.exe
 *.spec.bak
 
+# ---- 用户导入/参考包（大二进制，绝不可入库）----
+*.zip
+
 # ---- Python 缓存 ----
 __pycache__/
 *.pyc

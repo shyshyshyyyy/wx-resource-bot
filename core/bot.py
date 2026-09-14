@@ -6,9 +6,19 @@ import re
 import logging
 import threading
 
+try:
+    import schedule
+except Exception:
+    schedule = None
+
 from core import session as sess
 from core import template as tpl
 from core.wx_adapter import WeChatClient, WxError
+
+try:
+    from search import imported as _imp
+except Exception:
+    _imp = None
 
 log = logging.getLogger("bot")
 
@@ -57,6 +67,7 @@ class Bot:
 
         self._running = True
         self.stats["started_at"] = int(time.time())
+        self._setup_cleanup_schedule()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         return True, "已启动（内核：%s）" % self.wx.status()["core_label"]
@@ -71,7 +82,32 @@ class Bot:
     def _loop(self):
         while self._running:
             self.sessions.sweep()
+            if schedule is not None:
+                schedule.run_pending()
             time.sleep(5)
+
+    # ---------- 定时清理（移植自网盘搜索站 delete_search）----------
+    def _setup_cleanup_schedule(self):
+        """每天指定时刻执行一次「清理超期转存文件」。仅当面板开启时注册。"""
+        if schedule is None:
+            return
+        tcfg = self.cfg.get("transfer", {}).get("cleanup", {})
+        if not tcfg.get("enabled", False):
+            return
+        timestr = (tcfg.get("time", "03:00") or "03:00")
+        try:
+            schedule.every().day.at(timestr).do(self._cleanup_job)
+            log.info("已注册定时清理任务：每天 %s", timestr)
+        except Exception as e:
+            log.warning("注册定时清理任务失败（时刻=%s）: %s", timestr, e)
+
+    def _cleanup_job(self):
+        try:
+            from transfer import cleanup as TC
+            done, msg = TC.cleanup_due(self.cfg, self.transfer.pool)
+            log.info("定时清理执行：%s", msg)
+        except Exception:
+            log.exception("定时清理异常")
 
     @property
     def running(self):
@@ -209,6 +245,27 @@ class Bot:
                    sender, is_group)
 
         results, errors = self.searcher.search(keyword, pan=pan)
+
+        # 并入本地导入的资源（顾客需求 A）：混排盘搜结果 + 导入表
+        if _imp is not None and (self.cfg.get("imported", {}) or {}).get("enabled", True):
+            try:
+                imported_items = _imp.search_imported(keyword, pan=pan)
+                if imported_items:
+                    results = results + imported_items
+                    log.info("搜索并入本地导入 %d 条（关键词=%s）", len(imported_items), keyword)
+            except Exception as e:
+                log.warning("并入本地导入失败: %s", e)
+
+        # 去重：同一链接在盘搜结果和导入表里都出现时只留一条
+        seen, deduped = set(), []
+        for it in results:
+            k = it.uid
+            if k in seen:
+                continue
+            seen.add(k)
+            deduped.append(it)
+        results = deduped
+
         results = self._filter_ad_words(results)
         with self._stats_lock:
             self.stats["searches"] += 1
@@ -239,11 +296,15 @@ class Bot:
         lines = []
         for i, item in enumerate(ctx.page_items(), 1):
             pan = item.get("pan", "")
+            # 自有资源在标题前加 🏠，不改动用户自定义模板（避免 {own_mark} 占位符兼容问题）
+            title = item.get("title", "")
+            if item.get("own"):
+                title = "🏠 " + title
             lines.append(self.t(
                 "result_item", index=i,
                 index_emoji=tpl.index_emoji(i),
                 pan_icon=tpl.pan_icon(pan),
-                title=item.get("title", ""),
+                title=title,
                 pan_name=sess.PAN_DISPLAY.get(pan, pan),
                 source=item.get("source", ""),
                 size=item.get("size", ""),
@@ -281,6 +342,10 @@ class Bot:
         # 已经确认失效的（自动跳过途中遇到），直接跳下一条
         if item.get("dead"):
             return self._auto_skip(chat, sender, ctx, item, is_group, depth)
+
+        # 本地导入表里标「是自己的资源」：跳过转存，直接给原链接
+        if item.get("own"):
+            return self._reply_own(chat, item, sender, is_group)
 
         if not tcfg.get("enabled", True):
             return self._reply_origin(chat, item, "转存功能已关闭",
@@ -387,6 +452,14 @@ class Bot:
                 continue
             return it
         return None
+
+    def _reply_own(self, chat, item, sender=None, is_group=False):
+        """本地导入表里标「自己的资源」：跳过转存，直接把原链接发给用户。"""
+        url = item.get("url", "")
+        if item.get("password"):
+            url = "%s\n提取码：%s" % (url, item["password"])
+        self.reply(chat, self.t("own_resource", title=item.get("title", ""), url=url),
+                   sender, is_group)
 
     def _reply_origin(self, chat, item, reason, sender=None, is_group=False):
         if not self.cfg.get("transfer", {}).get("fallback_original_link", True):

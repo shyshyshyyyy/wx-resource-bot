@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QSpinBox, QVBoxLayout, QWidget, QComboBox, QPlainTextEdit,
+    QFileDialog,
 )
 
 from . import register
@@ -18,6 +19,10 @@ try:
     from search import pansou_client as PC
 except Exception:
     PC = None
+try:
+    from search import imported as IMP
+except Exception:
+    IMP = None
 
 
 def _norm(url: str) -> str:
@@ -190,6 +195,36 @@ def build(page, mw):
     g4l.setColumnStretch(4, 1)
     lay.addWidget(g4)
 
+    # ---------- 本地资源导入 ----------
+    g5 = QGroupBox("本地资源导入（顾客需求：自有资源跳过转存）")
+    g5l = QVBoxLayout(g5)
+    g5l.setContentsMargins(14, 16, 14, 16)
+    g5l.setSpacing(10)
+    tip_imp = QLabel(
+        "支持 xlsx / csv。标准列（表头含关键字即可，顺序不限）：\n"
+        "名称、链接（必填）；提取码（可选）；网盘类型（可选，留空按链接自动识别）；"
+        "是否自己的（是/否/1/0，默认否）。\n"
+        "导入后，用户发「搜索 关键词」会混排这些资源；标「是自己的」项获取时跳过转存、直接给原链。")
+    tip_imp.setObjectName("groupDesc")
+    tip_imp.setWordWrap(True)
+    g5l.addWidget(tip_imp)
+
+    row_imp = QHBoxLayout()
+    b_imp = QPushButton("选择表格导入")
+    b_imp.setFixedWidth(140)
+    b_clear_imp = QPushButton("清空导入")
+    b_clear_imp.setFixedWidth(110)
+    row_imp.addWidget(b_imp)
+    row_imp.addWidget(b_clear_imp)
+    row_imp.addStretch(1)
+    g5l.addLayout(row_imp)
+
+    lab_imp = QLabel("当前导入：0 条")
+    lab_imp.setObjectName("groupDesc")
+    lab_imp.setWordWrap(True)
+    g5l.addWidget(lab_imp)
+    lay.addWidget(g5)
+
     lay.addStretch(1)
 
     # ---------- 数据同步 ----------
@@ -217,6 +252,14 @@ def build(page, mw):
         sp_ttl.setValue(int(s.get("session_ttl", 300) or 300))
         e_ad.setPlainText(str(s.get("ad_words", "") or ""))
         ck_req_pan.setChecked(bool(s.get("require_pan_type", False)))
+        # 刷新「本地资源导入」计数
+        try:
+            n = IMP.count_imported() if IMP else 0
+        except Exception:
+            n = 0
+        ipath = (c.get("imported", {}).get("path", "") if CM else "") or ""
+        lab_imp.setText("当前导入：%d 条" % n +
+                        ("\n来源：%s" % ipath if ipath else ""))
 
     def collect():
         if CM is None:
@@ -281,6 +324,58 @@ def build(page, mw):
             mw.log(f"盘搜接口测试失败：{e}", "ERROR")
 
     btn_test.clicked.connect(on_test)
+
+    def _refresh_imp_label():
+        try:
+            n = IMP.count_imported() if IMP else 0
+        except Exception:
+            n = 0
+        path = ""
+        if CM:
+            path = CM.load_config().get("imported", {}).get("path", "") or ""
+        lab_imp.setText(
+            "当前导入：%d 条" % n +
+            ("\n来源：%s" % path if path else ""))
+
+    def on_import():
+        if IMP is None:
+            warn(mw, "提示", "导入模块加载失败")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            mw, "选择资源表格", "", "表格文件 (*.xlsx *.csv)")
+        if not path:
+            return
+        try:
+            count, errs = IMP.import_table(path)
+        except Exception as e:
+            warn(mw, "导入失败", str(e)[:400])
+            mw.log("本地资源导入失败：%s" % e, "ERROR")
+            return
+        if CM:
+            c = CM.load_config()
+            c.setdefault("imported", {})["path"] = path
+            c["imported"]["enabled"] = True
+            CM.save_config(c)
+        _refresh_imp_label()
+        msg = "成功导入 %d 条资源" % count
+        if errs:
+            msg += "\n\n跳过 %d 行：\n%s" % (len(errs), "\n".join(errs[:20]))
+        info(mw, "导入完成", msg)
+        mw.log("本地资源导入 %d 条（来自 %s）" % (count, path), "SUCCESS")
+
+    def on_clear_import():
+        if IMP is None:
+            warn(mw, "提示", "导入模块加载失败")
+            return
+        if IMP.clear_imported():
+            _refresh_imp_label()
+            info(mw, "已清空", "本地导入的资源已全部清除。")
+            mw.log("已清空本地导入资源", "WARN")
+        else:
+            warn(mw, "提示", "清空失败")
+
+    b_imp.clicked.connect(on_import)
+    b_clear_imp.clicked.connect(on_clear_import)
 
     w.load = load
     w.collect = collect

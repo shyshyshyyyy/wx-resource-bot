@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QPushButton, QRadioButton,
     QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
-    QCheckBox, QPlainTextEdit,
+    QCheckBox, QPlainTextEdit, QTimeEdit,
 )
 
 from . import register
@@ -22,6 +22,10 @@ try:
     import config_manager as CM
 except Exception:
     CM = None
+try:
+    from transfer import cleanup as TC
+except Exception:
+    TC = None
 
 PAN_NAMES = {
     "quark": "夸克", "baidu": "百度", "uc": "UC", "aliyun": "阿里云",
@@ -666,6 +670,31 @@ def build(page, mw):
     g2l.setColumnStretch(3, 1)
     lay.addWidget(g2)
 
+    # ---------- 定时清理（转存到自己网盘的文件）----------
+    g3 = QGroupBox("定时清理（转存到自己网盘的文件）")
+    g3l = QGridLayout(g3)
+    g3l.setContentsMargins(14, 16, 14, 16)
+    g3l.setVerticalSpacing(10)
+    ck_clean = QCheckBox("启用定时清理（每天指定时刻删除超期转存文件）")
+    ck_clean.setToolTip("移植自网盘搜索站的 delete_search："
+                        "只删「机器人转存记录」里的文件，旧分享链接会随之失效，"
+                        "与搜索站行为一致；不会碰你网盘里的其他自有文件。")
+    e_clean_time = QTimeEdit()
+    e_clean_time.setDisplayFormat("HH:mm")
+    sp_clean_older = QSpinBox()
+    sp_clean_older.setRange(1, 365)
+    sp_clean_older.setSuffix(" 天")
+    b_clean_now = QPushButton("立即清理一次（测试）")
+    b_clean_now.setFixedWidth(150)
+    g3l.addWidget(ck_clean, 0, 0, 1, 3)
+    g3l.addWidget(QLabel("执行时刻"), 1, 0)
+    g3l.addWidget(e_clean_time, 1, 1)
+    g3l.addWidget(QLabel("保留天数"), 1, 2)
+    g3l.addWidget(sp_clean_older, 1, 3)
+    g3l.addWidget(b_clean_now, 2, 0, alignment=Qt.AlignLeft)
+    g3l.setColumnStretch(3, 1)
+    lay.addWidget(g3)
+
     lay.addStretch(1)
 
     def _row(acc):
@@ -829,6 +858,22 @@ def build(page, mw):
         refresh()
         info(mw, "检测结果", msg[:400])
 
+    def on_clean_now():
+        if TC is None or CM is None:
+            warn(mw, "提示", "清理模块加载失败")
+            return
+        c = CM.load_config()
+        try:
+            done, msg = TC.cleanup_due(c, save_fn=CM.save_config)
+        except Exception as e:
+            warn(mw, "清理失败", str(e)[:400])
+            mw.log("立即清理失败：%s" % e, "ERROR")
+            return
+        info(mw, "清理结果", msg)
+        mw.log("立即清理：%s" % msg, "INFO")
+
+    b_clean_now.clicked.connect(on_clean_now)
+
     def load(cfg):
         refresh()
         if CM:
@@ -838,6 +883,14 @@ def build(page, mw):
             ck_fb.setChecked(bool(t.get("fallback_original_link", True)))
             sp_exp.setValue(int(t.get("share_expire_days", 0) or 0))
             ck_cleanup.setChecked(bool(t.get("cleanup_after_share", False)))
+            cl = t.get("cleanup", {})
+            ck_clean.setChecked(bool(cl.get("enabled", False)))
+            try:
+                hh, mm = str(cl.get("time", "03:00") or "03:00").split(":")
+                e_clean_time.setTime(QtGui.QTime(int(hh), int(mm)))
+            except Exception:
+                e_clean_time.setTime(QtGui.QTime(3, 0))
+            sp_clean_older.setValue(int(cl.get("older_than_days", 7) or 7))
 
     def collect():
         if CM is None:
@@ -848,6 +901,11 @@ def build(page, mw):
         c["transfer"]["fallback_original_link"] = ck_fb.isChecked()
         c["transfer"]["share_expire_days"] = sp_exp.value()
         c["transfer"]["cleanup_after_share"] = ck_cleanup.isChecked()
+        c["transfer"]["cleanup"] = {
+            "enabled": ck_clean.isChecked(),
+            "time": e_clean_time.time().toString("HH:mm"),
+            "older_than_days": sp_clean_older.value(),
+        }
         CM.save_config(c)
         return {}
 

@@ -78,6 +78,19 @@ DEFAULT_CONFIG = {
         # 关掉则只提示"该条已失效"，由用户自己翻页/重选。默认开启，体验更顺。
         "auto_skip_dead": True,
         "accounts": [],                   # 见下方 ACCOUNT_TEMPLATE
+        # 定时清理转存到自己网盘的资源文件（移植自网盘搜索站的 delete_search）。
+        # 只删「机器人本次运行以来转存记录」里的文件；保留期与时刻均可自定义。
+        "cleanup": {
+            "enabled": False,             # 默认关，用户在面板开启
+            "time": "03:00",               # 每天执行时刻 HH:MM
+            "older_than_days": 7,          # 保留天数，超过即删
+        },
+    },
+
+    # 本地表格导入的资源（面板导入 xlsx/csv 后写入 data/imported.json）。
+    "imported": {
+        "enabled": True,
+        "path": "",                       # 最近一次导入的表格路径（仅展示用）
     },
 
     "templates": {
@@ -109,6 +122,8 @@ DEFAULT_CONFIG = {
         "invalid_index": "序号超出范围，请回复 1-{max} 之间的数字。",
         "no_account": "「{pan_name}」尚未配置可用账号，请联系管理员。",
         "unlicensed": "程序未激活，请联系管理员。",
+        # 本地导入表里标记为「自己的资源」的项：获取时跳过转存，直接给原链
+        "own_resource": "✅「{title}」是你的自有资源，无需转存，原链接如下：\n{url}",
     },
 
     "advanced": {

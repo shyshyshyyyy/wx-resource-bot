@@ -140,6 +140,7 @@ class BaseAdapter(abc.ABC):
         # 轮转）写回磁盘。不注入时静默跳过，保持向后兼容。
         self._cfg = cfg
         self._save_fn = save_fn
+        self.last_file_ids = None        # 最近一次转存产生的文件 ID，供定时清理
 
     def _persist_account(self):
         """把 self.account 的就地修改（如迅雷 refresh_token 轮转）写回磁盘配置。
@@ -204,6 +205,8 @@ class BaseAdapter(abc.ABC):
         dir_id = (self.account.get("temp_dir_id") if use_temp
                   else self.account.get("save_dir_id")) or ""
         file_ids = self.save(share_url, password, dir_id)
+        # 记下本次转存产生的文件 ID，供「定时清理」把文件删掉（见 run()）
+        self.last_file_ids = file_ids
         if not file_ids:
             raise TransferError("转存后没有拿到文件 ID")
         result = self.share(file_ids, title=title, expire_days=expire_days)
@@ -361,6 +364,16 @@ class TransferService:
                     expire_days=expire, use_temp=use_temp,
                     cleanup_after=cleanup_after)
                 self.pool.mark_used(acc["id"], ok=True)
+                # 记录本次转存（网盘类型 + 账号 + 文件ID + 时间），
+                # 供「定时清理」按保留期把文件从自己网盘删掉。
+                file_ids = getattr(adapter, "last_file_ids", None)
+                if file_ids:
+                    try:
+                        from transfer import cleanup as _TC
+                        _TC.record_transfer(pan, acc["id"], file_ids,
+                                            title=title, url=share_url)
+                    except Exception as _e:
+                        log.warning("[%s] 转存记录失败（不影响取链）: %s", pan, _e)
                 return res, "", _OK
             except TransferError as e:
                 last_err = str(e)
